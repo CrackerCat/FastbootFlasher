@@ -41,40 +41,32 @@ namespace FastbootFlasher
             Log.Clear();
             Microsoft.Win32.OpenFileDialog openFileDialog =new();
             openFileDialog.Filter = "APP文件|*.app";
-            openFileDialog.Multiselect = false;
+            openFileDialog.Multiselect = true;
             openFileDialog.Title = "选择文件"; 
 
             if (openFileDialog.ShowDialog() == true)
             {
-                string FilePath = openFileDialog.FileName;
-                var appfile = UpdateFile.Open(FilePath, false);
-                var entry1 = appfile.Entries[2];
-                Stream dataStream = entry1.GetDataStream(FilePath);
-                StreamReader reader = new StreamReader(dataStream, Encoding.UTF8);
-                string content = reader.ReadToEnd();
-                Log.AppendText("版本信息：\n");
-                Log.Text+=content+"\n\r";
-                for (int i = 0; i < appfile.Entries.Count; i++)
+                string[] FilePath = openFileDialog.FileNames;
+                for (int i = 0; i < FilePath.Length; i++)
                 {
-                    var entry = appfile.Entries[i];
+                    var appfile = UpdateFile.Open(FilePath[i], false);
+                    var entry = appfile.Entries[2];
+                    Stream dataStream = entry.GetDataStream(FilePath[i]);
+                    StreamReader reader = new StreamReader(dataStream, Encoding.UTF8);
+                    string content = reader.ReadToEnd();
+                    Log.AppendText("版本信息：\n");
+                    Log.Text += content + "\n\r";
+                    Log.ScrollToEnd();
+                    for (int a = 0; a < appfile.Entries.Count; a++)
+                    {
+                        entry = appfile.Entries[a];
+                        Listview.Items.Add(new ListViewItem { Num = a, Partitions = entry.FileType.ToLower(), Size = FormatSize(entry.FileSize), Address = "0x" + entry.FileSize.ToString("X8"),SourceFilePath = FilePath[i]});
+                    }
+                    this.FilePath.Text += FilePath[i]+"\n";
 
-                    Listview.Items.Add(new ListViewItem { Num = i, Partitions = entry.FileType.ToLower(), Size = FormatSize(entry.FileSize),Address= "0x" + entry.FileSize.ToString("X8") });
-                }
-                this.FilePath.Text = FilePath;
+                }     
             }
 
-        }
-
-        static string FormatSize(long size)
-        {
-            if (size < 1024)
-                return $"{size}B";
-            else if (size < 1024 * 1024)
-                return $"{size / 1024.0:F2}KB";
-            else if (size < 1024 * 1024 * 1024)
-                return $"{size / (1024.0 * 1024.0):F2}MB";
-            else
-                return $"{size / (1024.0 * 1024.0 * 1024.0):F2}GB";
         }
 
         private async void Flash_Click(object sender, RoutedEventArgs e)
@@ -110,41 +102,45 @@ namespace FastbootFlasher
                 return;
                 
             }
+            APPProcess APP = new();
             foreach (var item in Listview.SelectedItems)
             {
                 if (item is ListViewItem selectedItem)
                 {
                     int num = selectedItem.Num;
-                    var appfile = UpdateFile.Open(FilePath.Text, false);
+                    string FilePath = selectedItem.SourceFilePath;
+                    var appfile = UpdateFile.Open(FilePath, false);
                     var entry = appfile.Entries[num];
-                    APPProcess APPprocess = new();
                     var progressReporter = new Progress<double>(p => ProgressBar1.Value = p);
                     Log.Text+= $"开始提取{entry.FileType.ToLower()}...\n";
-                    await APPprocess.ExtractPartition(FilePath.Text,num, progressReporter);
+                    await APP.ExtractPartition(FilePath,num, progressReporter);
                     Log.Text += $"提取{entry.FileType.ToLower()}分区完成！\n\r";
                     Log.ScrollToEnd(); 
                 }
             }
             Log.Text += "所有选中分区提取完成！\n\r";
+            if (File.Exists($@".\images\super.1.img"))
+            {
+
+                Log.Text += "检测到两个super分区，开始合成...\n";
+                await APP.MergerSuperSparse();
+                File.Delete(@".\images\super.1.img");
+                File.Delete(@".\images\super.2.img");
+                Log.Text += "合成完毕！\n";
+            }
             fastboot.Disconnect();
+            Listview.IsEnabled = false;
             foreach (var item in Listview.SelectedItems.Cast<ListViewItem>())
             {
                 string partition = item.Partitions;
-                
                 Log.Text += $"正在刷入 {partition} 分区...\n";
-                if (partition == "hisiufs_gpt")
-                {
-                    partition = "ptable";
-                }
-                if (partition == "ufsfw")
-                {
-                    partition = "ufs_fw";
-                }
+                if (partition == "hisiufs_gpt")partition = "ptable";
+                if (partition == "ufsfw")partition = "ufs_fw";
+                if (partition == "super")if(!File.Exists($@".\images\super.img"))continue;
                 await RunFastbootAsync(
                     arguments: $@"flash {partition} .\images\{partition}.img",
                     outputCallback: msg =>
                     {
-                       
                         Dispatcher.Invoke(() =>
                         {
                             Log.Text += $"{msg}";
@@ -155,8 +151,10 @@ namespace FastbootFlasher
 
                 File.Delete($@".\images\{partition}.img");
                 Log.Text += $"刷入 {partition} 完成！\n\r";
+                Log.ScrollToEnd();
             }
-            Log.Text += $"所有选中分区完成！\n\r";
+            Listview.IsEnabled = true;
+            Log.Text += $"所有选中分区刷写完成！\n\r";
             Log.ScrollToEnd();
 
         }
@@ -183,11 +181,66 @@ namespace FastbootFlasher
 
         private void RebootButton_Click(object sender, RoutedEventArgs e)
         {
+            var devices = Fastboot.GetDevices();
+            if (devices.Length == 0)
+            {
+                Log.Text += "未检测到Fastboot设备\n";
+                return;
+            }
+            if (devices.Length > 1)
+            {
+                Log.Text += "检测到多台设备，请只连接一台设备！\n";
+            }
             Fastboot fastboot = new();
             fastboot.Connect();
             fastboot.Command("reboot");
             fastboot.Disconnect();
             Log.Text += "重启完成！\n\r";
+        }
+
+        static string FormatSize(long size)
+        {
+            if (size < 1024)
+                return $"{size}B";
+            else if (size < 1024 * 1024)
+                return $"{size / 1024.0:F2}KB";
+            else if (size < 1024 * 1024 * 1024)
+                return $"{size / (1024.0 * 1024.0):F2}MB";
+            else
+                return $"{size / (1024.0 * 1024.0 * 1024.0):F2}GB";
+        }
+
+
+        private async void MenuItemExtractSelected_Click(object sender, RoutedEventArgs e)
+        {
+            APPProcess APP = new();
+            Listview.IsEnabled = false;
+            foreach (var item in Listview.SelectedItems.Cast<ListViewItem>())
+            {
+                string partition = item.Partitions;
+                string FilePath = item.SourceFilePath;
+                if (partition == "hisiufs_gpt")
+                    partition = "ptable";
+                if (partition == "ufsfw")
+                    partition = "ufs_fw";
+                Log.Text += $"正在提取 {partition} 分区...\n";
+                var progressReporter = new Progress<double>(p => ProgressBar1.Value = p);
+                await APP.ExtractPartition(FilePath, item.Num, progressReporter);
+                Log.Text += $"{partition}分区提取完成！\n\r";
+                Log.ScrollToEnd();
+            }
+            Listview.IsEnabled = true;
+            Log.Text += $"所有选中分区已提取到images文件夹！\n\r";
+            if (File.Exists($@".\images\super.1.img"))
+            {
+                Log.Text += "检测到两个super分区，开始合成...\n";
+                await APP.MergerSuperSparse();
+                File.Delete(@".\images\super.1.img");
+                File.Delete(@".\images\super.2.img");
+                Log.Text += "合成完毕！\n\r";
+            }
+            Log.ScrollToEnd();
+
         }
     }
 
@@ -198,8 +251,12 @@ namespace FastbootFlasher
         public string Partitions { get; set; }
         public string Size { get; set; }
         public string Address { get; set; }
+
+        public string SourceFilePath { get; set; } 
     }
 
+
 }
+
 
 
