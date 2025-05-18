@@ -5,38 +5,55 @@
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:local="clr-namespace:FastbootFlasher"
         mc:Ignorable="d"
-        Title="斑•Fastboot刷写者 Ver.1.2" Height="450" Width="700">
+        Title="斑•Fastboot刷写者 Ver.1.4" Height="500" Width="700">
     <Grid>
         <Grid.ColumnDefinitions>
-            <ColumnDefinition Width="611*"/>
-            <ColumnDefinition Width="89*"/>
         </Grid.ColumnDefinitions>
-        <ListView x:Name="Listview" Margin="10,10,0,0" HorizontalAlignment="Left" VerticalAlignment="Top" Height="281" Width="425">
-            <ListView.View>
-                <GridView>
-                    <GridViewColumn Header="序号" Width="30" DisplayMemberBinding="{Binding Num}"/>
-                    <GridViewColumn Header="分区" Width="130" DisplayMemberBinding="{Binding Partitions}"/>
-                    <GridViewColumn Header="大小" Width="130" DisplayMemberBinding="{Binding Size}"/>
-                    <GridViewColumn Header="地址" Width="130" DisplayMemberBinding="{Binding Address}"/>
-                    <GridViewColumn Header="源文件" DisplayMemberBinding="{Binding SourceFilePath}" Width="0"/>
-                </GridView>
-            </ListView.View>
-            <ListView.ContextMenu>
-                <ContextMenu>
-                    <MenuItem Header="提取选中分区" Click="MenuItemExtractSelected_Click"/>
-                </ContextMenu>
-            </ListView.ContextMenu>
-        </ListView>
-        <Button x:Name="LoadFile" Content="加载文件" HorizontalAlignment="Left" Margin="375,296,0,0" VerticalAlignment="Top" Height="30" Width="60" Click="LoadFile_Click"/>
-        <TextBox x:Name="FilePath" HorizontalAlignment="Left" Height="30" Margin="10,296,0,0" TextWrapping="Wrap" VerticalAlignment="Top" Width="360"/>
-        <Button x:Name="Flash" Content="刷写" HorizontalAlignment="Left" Margin="10,331,0,0" VerticalAlignment="Top" Height="40" Width="425" Click="Flash_Click" FontSize="15"/>
-        <TextBox x:Name="Log" HorizontalAlignment="Left" Margin="449,10,0,0" TextWrapping="Wrap" VerticalAlignment="Top" Width="225" Height="316" Grid.ColumnSpan="2"/>
-        <ProgressBar x:Name="ProgressBar1" HorizontalAlignment="Left" Height="20" Margin="10,376,0,0" VerticalAlignment="Top" Width="425"/>
-        <Button x:Name="RebootButton" Content="重启设备" HorizontalAlignment="Left" Margin="449,331,0,0" VerticalAlignment="Top" Height="40" Width="225" Click="RebootButton_Click" Grid.ColumnSpan="2"/>
-        <Button Content="预设" HorizontalAlignment="Left" Margin="449,376,0,0" VerticalAlignment="Top" Height="20" Width="50"/>
-        <Button Content="预设" HorizontalAlignment="Left" Margin="13,376,0,0" VerticalAlignment="Top" Height="20" Width="50" Grid.Column="1"/>
-        <Button Content="预设" HorizontalAlignment="Left" Margin="504,376,0,0" VerticalAlignment="Top" Height="20" Width="50"/>
-        <Button Content="预设" HorizontalAlignment="Left" Margin="565,376,0,0" VerticalAlignment="Top" Height="20" Width="50" Grid.ColumnSpan="2"/>
+        <TabControl>
+            <TabItem Header="线刷">
+                <Grid Background="#FFE5E5E5">
+                    <ListView x:Name="Listview" Margin="10,10,0,0" HorizontalAlignment="Left" VerticalAlignment="Top" Height="281" Width="425">
+                        <ListView.View>
+                            <GridView>
+                                <GridViewColumn Header="序号" Width="30" DisplayMemberBinding="{Binding Num}"/>
+                                <GridViewColumn Header="分区" Width="130" DisplayMemberBinding="{Binding Partitions}"/>
+                                <GridViewColumn Header="大小" Width="130" DisplayMemberBinding="{Binding Size}"/>
+                                <GridViewColumn Header="地址" Width="130" DisplayMemberBinding="{Binding Address}"/>
+                                <GridViewColumn Header="源文件" DisplayMemberBinding="{Binding SourceFilePath}" Width="0"/>
+                            </GridView>
+                        </ListView.View>
+                        <ListView.ContextMenu>
+                            <ContextMenu>
+                                <MenuItem Header="提取选中分区" Click="MenuItemExtractSelected_Click"/>
+                            </ContextMenu>
+                        </ListView.ContextMenu>
+                    </ListView>
+                    <Button x:Name="LoadFile" Content="加载文件" HorizontalAlignment="Left" Margin="375,296,0,0" VerticalAlignment="Top" Height="30" Width="60" Click="LoadFile_Click"/>
+                    <TextBox x:Name="FilePath" HorizontalAlignment="Left" Height="30" Margin="10,296,0,0" TextWrapping="Wrap" VerticalAlignment="Top" Width="360"/>
+                    <Button x:Name="Flash" Content="刷写" HorizontalAlignment="Left" Margin="10,331,0,0" VerticalAlignment="Top" Height="40" Width="425" Click="Flash_Click" FontSize="15"/>
+                    <TextBox x:Name="Log" HorizontalAlignment="Left" Margin="449,10,0,0" TextWrapping="Wrap" VerticalAlignment="Top" Width="225" Height="316" Grid.ColumnSpan="3"/>
+                    <ProgressBar x:Name="ProgressBar1" HorizontalAlignment="Left" Height="20" Margin="10,376,0,0" VerticalAlignment="Top" Width="425"/>
+                    <Button x:Name="RebootButton" Content="重启设备" HorizontalAlignment="Left" Margin="449,331,0,0" VerticalAlignment="Top" Height="40" Width="225" Click="RebootButton_Click" Grid.ColumnSpan="3"/>
+                    <Button Content="预设" HorizontalAlignment="Left" Margin="449,376,0,0" VerticalAlignment="Top" Height="20" Width="50"/>
+                    <Button Content="预设" HorizontalAlignment="Left" Margin="624,376,0,0" VerticalAlignment="Top" Height="20" Width="50"/>
+                    <Button Content="预设" HorizontalAlignment="Left" Margin="504,376,0,0" VerticalAlignment="Top" Height="20" Width="50"/>
+                    <Button Content="预设" HorizontalAlignment="Left" Margin="565,376,0,0" VerticalAlignment="Top" Height="20" Width="50" Grid.ColumnSpan="3"/>
+                </Grid>
+            </TabItem>
+            <TabItem Header="关于">
+                <Grid Background="#FFE5E5E5">
+                    <Canvas>
+                        <Image Height="128" Width="128" Source="/logo.ico" Canvas.Left="115" Canvas.Top="168" HorizontalAlignment="Left" VerticalAlignment="Top"/>
+                        <Label  Content="斑•Fastboot刷写者" Canvas.Left="272" Canvas.Top="165" HorizontalAlignment="Left" VerticalAlignment="Center" FontSize="36"/>
+                        <Label  Content="版本：V1.4" Canvas.Left="272" Canvas.Top="222" HorizontalAlignment="Left" VerticalAlignment="Top" FontSize="20"/>
+                        <Label  Content="作者：Natsume324" Canvas.Left="401" Canvas.Top="221" HorizontalAlignment="Left" VerticalAlignment="Top" FontSize="20"/>
+                        <Button x:Name="OpenGit" Content="访问源代码" Canvas.Left="280" Canvas.Top="262" HorizontalAlignment="Left" VerticalAlignment="Center" Click="OpenGit_Click" Height="34" Width="153"/>
+                        <Button x:Name="OpenQQ"  Content="QQ交流群" Canvas.Left="456" Canvas.Top="262" HorizontalAlignment="Left" VerticalAlignment="Center" Height="34" Width="137" Click="OpenQQ_Click" />
+                    </Canvas>
 
+                </Grid>
+            </TabItem>
+        </TabControl>
     </Grid>
+
 </Window>

@@ -16,9 +16,11 @@ using System.Windows.Shapes;
 using HuaweiUpdateLibrary;
 using HuaweiUpdateLibrary.Core;
 using HuaweiUpdateLibrary.Streams;
-using Potato.Fastboot;
-using FastbootCLI;
+using Fastboot;
 using System.Collections.Concurrent;
+using System.Reflection.Metadata;
+using System.Text.RegularExpressions;
+using System.Diagnostics;
 
 namespace FastbootFlasher
 {
@@ -27,9 +29,11 @@ namespace FastbootFlasher
     /// </summary>
     public partial class MainWindow : Window
     {
+        public static MainWindow Instance { get; private set; }
         public MainWindow()
         {
             InitializeComponent();
+            Instance = this;
             Log.IsReadOnly = true;
             FilePath.IsReadOnly = true;
 
@@ -40,148 +44,178 @@ namespace FastbootFlasher
             Listview.Items.Clear();
             Log.Clear();
             Microsoft.Win32.OpenFileDialog openFileDialog =new();
-            openFileDialog.Filter = "APP文件|*.app";
+            openFileDialog.Filter = "固件文件|*.app;flash_all.bat";
             openFileDialog.Multiselect = true;
             openFileDialog.Title = "选择文件"; 
 
             if (openFileDialog.ShowDialog() == true)
             {
-                string[] FilePath = openFileDialog.FileNames;
-                for (int i = 0; i < FilePath.Length; i++)
+                if (openFileDialog.SafeFileName == "flash_all.bat")
                 {
-                    var appfile = UpdateFile.Open(FilePath[i], false);
-                    var entry = appfile.Entries[2];
-                    Stream dataStream = entry.GetDataStream(FilePath[i]);
-                    StreamReader reader = new StreamReader(dataStream, Encoding.UTF8);
-                    string content = reader.ReadToEnd();
-                    Log.AppendText("版本信息：\n");
-                    Log.Text += content + "\n\r";
-                    Log.ScrollToEnd();
-                    for (int a = 0; a < appfile.Entries.Count; a++)
+                    FilePath.Text += openFileDialog.FileName;
+                    string[] lines = File.ReadAllLines(openFileDialog.FileName);
+                    Regex flashRegex = new Regex(@"\bflash\s+(\w+)\s+(?:%~dp0)?images[\\/]([\w\.\-\\/]+)(?=\s|\|)", RegexOptions.IgnoreCase);
+                    int i=0;
+                    foreach (string line in lines)
                     {
-                        entry = appfile.Entries[a];
-                        Listview.Items.Add(new ListViewItem { Num = a, Partitions = entry.FileType.ToLower(), Size = FormatSize(entry.FileSize), Address = "0x" + entry.FileSize.ToString("X8"),SourceFilePath = FilePath[i]});
-                    }
-                    this.FilePath.Text += FilePath[i]+"\n";
+                        Match match = flashRegex.Match(line);
+                        if (match.Success)
+                        {
+                            i++;
+                            string original = match.Groups[1].Value;
+                            string partitionName;
+                            if (original.EndsWith("_ab"))
+                            {
+                                partitionName = original.Substring(0, original.Length - 3);
+                            }
+                            else
+                            {
+                                partitionName = original;
+                            }
+                            string imgName = match.Groups[2].Value.Replace("\\", "/");
+                            string batPath = openFileDialog.FileName.Substring(0, openFileDialog.FileName.Length - 13);
+                            string imgPath= @$"{batPath}images\{imgName}";
+                            FileInfo fileInfo = new FileInfo(imgPath);
+                            long imgSize = fileInfo.Length;
 
-                }     
+                            Listview.Items.Add(new ListViewItem { Num = i, Size = FormatSize(imgSize), Address = "0x" + imgSize.ToString("X8"),Partitions = partitionName, SourceFilePath = imgPath });
+                        }
+                    }
+                }
+
+                else
+                {
+                    string[] FilePath = openFileDialog.FileNames;
+                    for (int i = 0; i < FilePath.Length; i++)
+                    {
+                        var appfile = UpdateFile.Open(FilePath[i], false);
+                        var entry = appfile.Entries[2];
+                        Stream dataStream = entry.GetDataStream(FilePath[i]);
+                        StreamReader reader = new StreamReader(dataStream, Encoding.UTF8);
+                        string content = reader.ReadToEnd();
+                        Log.AppendText("版本信息：\n");
+                        Log.Text += content + "\n\r";
+                        Log.ScrollToEnd();
+                        for (int a = 0; a < appfile.Entries.Count; a++)
+                        {
+                            entry = appfile.Entries[a];
+                            Listview.Items.Add(new ListViewItem { Num = a, Partitions = entry.FileType.ToLower(), Size = FormatSize(entry.FileSize), Address = "0x" + entry.FileSize.ToString("X8"), SourceFilePath = FilePath[i] });
+                        }
+                        this.FilePath.Text += FilePath[i] + "\n";
+
+                    }
+                }
             }
 
         }
 
         private async void Flash_Click(object sender, RoutedEventArgs e)
         {
-            var devices = Fastboot.GetDevices();
-            if (devices.Length == 0)
-            {
-                Log.Text += "未检测到Fastboot设备\n";
-                return;
-            }
-            if (devices.Length>1)
-            {
-                Log.Text += "检测到多台设备，请只连接一台设备！\n";
-            }     
-            Log.Text += $"已检测到设备：{string.Join(", ", devices)}\n";
-            Fastboot fastboot= new Fastboot();
-            Log.Text += "连接设备...\n";
-            fastboot.Connect();
-            Log.Text += $"已连接到设备：{fastboot.GetSerialNumber()}\n\r";
-            Log.Text += "读取设备解锁状态...\n";
-            var response = fastboot.Command("oem lock-state info");
-            if (response.Status == Fastboot.Status.Okay)
-            {
-                Log.Text+=$"{response.Payload}";
-            }
-            else
-            {
-                Log.Text += $"错误：{response.Payload}\n";
-            }
             if (Listview.SelectedItems.Count == 0)
             {
                 MessageBox.Show("未选择分区！", "提示", MessageBoxButton.OK, MessageBoxImage.Warning);
                 return;
-                
+
             }
-            APPProcess APP = new();
-            foreach (var item in Listview.SelectedItems)
+            var devices = Potato.Fastboot.Fastboot.GetDevices();
+            if (devices.Length == 0)
             {
-                if (item is ListViewItem selectedItem)
+                Log.Text += "未检测到Fastboot设备";
+                return;
+            }
+            if (devices.Length > 1)
+            {
+                Log.Text += "检测到多台设备，请只连接一台设备！\n";
+            }
+            Log.Text += $"已检测到设备：{string.Join(", ", devices)}\n";
+            Potato.Fastboot.Fastboot fastboot = new();
+            FastbootCli fb = new();
+            Log.Text += "连接设备...\n";
+            fastboot.Connect();
+            Log.Text += $"已连接到设备：{fastboot.GetSerialNumber()}\n\r";
+            Log.Text += "读取设备解锁状态...\n";
+
+            Potato.Fastboot.Fastboot.Response response;
+            if (FilePath.Text.EndsWith("flash_all.bat"))
+            {
+                response = fastboot.Command("oem device-info");
+                Log.Text += $"{response.Payload}";
+                fastboot.Disconnect();
+
+                Flash.IsEnabled = false;
+                RebootButton.IsEnabled = false;
+                Flash.Content="刷写中...";
+                Listview.IsEnabled = false;
+
+                foreach (var item in Listview.SelectedItems.Cast<ListViewItem>())
                 {
-                    int num = selectedItem.Num;
-                    string FilePath = selectedItem.SourceFilePath;
-                    var appfile = UpdateFile.Open(FilePath, false);
-                    var entry = appfile.Entries[num];
-                    var progressReporter = new Progress<double>(p => ProgressBar1.Value = p);
-                    Log.Text+= $"开始提取{entry.FileType.ToLower()}...\n";
-                    await APP.ExtractPartition(FilePath,num, progressReporter);
-                    Log.Text += $"提取{entry.FileType.ToLower()}分区完成！\n\r";
-                    Log.ScrollToEnd(); 
+                    string partition = item.Partitions;
+                    string FilePath = item.SourceFilePath;
+                    Log.Text += $"正在刷入 {partition} 分区...\n";
+                    await fb.Fastboot($@"flash {partition} {FilePath}");
+                    Log.Text += $"刷入 {partition} 完成！\n\r";
+                    Log.ScrollToEnd();
                 }
             }
-            Log.Text += "所有选中分区提取完成！\n\r";
-            if (File.Exists($@".\images\super.1.img"))
+            else
             {
-
-                Log.Text += "检测到两个super分区，开始合成...\n";
-                await APP.MergerSuperSparse();
-                File.Delete(@".\images\super.1.img");
-                File.Delete(@".\images\super.2.img");
-                Log.Text += "合成完毕！\n";
-            }
-            fastboot.Disconnect();
-            Listview.IsEnabled = false;
-            foreach (var item in Listview.SelectedItems.Cast<ListViewItem>())
-            {
-                string partition = item.Partitions;
-                Log.Text += $"正在刷入 {partition} 分区...\n";
-                if (partition == "hisiufs_gpt")partition = "ptable";
-                if (partition == "ufsfw")partition = "ufs_fw";
-                if (partition == "super")if(!File.Exists($@".\images\super.img"))continue;
-                await RunFastbootAsync(
-                    arguments: $@"flash {partition} .\images\{partition}.img",
-                    outputCallback: msg =>
+                response = fastboot.Command("oem lock-state info");
+                Log.Text += $"{response.Payload}";
+                fastboot.Disconnect();
+                APPProcess APP = new();
+                foreach (var item in Listview.SelectedItems)
+                {
+                    if (item is ListViewItem selectedItem)
                     {
-                        Dispatcher.Invoke(() =>
-                        {
-                            Log.Text += $"{msg}";
-                            Log.ScrollToEnd();
-                        });
+                        int num = selectedItem.Num;
+                        string FilePath = selectedItem.SourceFilePath;
+                        var appfile = UpdateFile.Open(FilePath, false);
+                        var entry = appfile.Entries[num];
+                        var progressReporter = new Progress<double>(p => ProgressBar1.Value = p);
+                        Log.Text += $"开始提取{entry.FileType.ToLower()}...\n";
+                        await APP.ExtractPartition(FilePath, num, progressReporter);
+                        Log.Text += $"提取{entry.FileType.ToLower()}分区完成！\n\r";
+                        Log.ScrollToEnd();
                     }
-                );
+                }
+                Log.Text += "所有选中分区提取完成！\n\r";
+                if (File.Exists($@".\images\super.1.img"))
+                {
 
-                File.Delete($@".\images\{partition}.img");
-                Log.Text += $"刷入 {partition} 完成！\n\r";
-                Log.ScrollToEnd();
-            }
+                    Log.Text += "检测到两个super分区，开始合成...\n";
+                    await APP.MergerSuperSparse();
+                    File.Delete(@".\images\super.1.img");
+                    File.Delete(@".\images\super.2.img");
+                    Log.Text += "合成完毕！\n";
+                }
+                RebootButton.IsEnabled = false;
+                Flash.IsEnabled = false;
+                Flash.Content = "刷写中...";
+                Listview.IsEnabled = false;
+                foreach (var item in Listview.SelectedItems.Cast<ListViewItem>())
+                {
+                    string partition = item.Partitions;
+                    Log.Text += $"正在刷入 {partition} 分区...\n";
+                    if (partition == "hisiufs_gpt") partition = "ptable";
+                    if (partition == "ufsfw") partition = "ufs_fw";
+                    if (partition == "super") if (!File.Exists($@".\images\super.img")) continue;
+                    await fb.Fastboot($@"flash {partition} .\images\{partition}.img");
+                    File.Delete($@".\images\{partition}.img");
+                    Log.Text += $"刷入 {partition} 完成！\n\r";
+                    Log.ScrollToEnd();
+                }
+            }     
             Listview.IsEnabled = true;
+            RebootButton.IsEnabled = true;
+            Flash.Content = "刷写";
+            Flash.IsEnabled = true;
             Log.Text += $"所有选中分区刷写完成！\n\r";
             Log.ScrollToEnd();
-
-        }
-        private async Task RunFastbootAsync(string arguments, Action<string> outputCallback)
-        {
-            await Task.Run(() =>
-            {
-                using (var fastboot = new FastbootCli(arguments))
-                {
-                    while (!fastboot.stdout.EndOfStream)
-                    {
-                        string line = fastboot.stdout.ReadLine();
-                        outputCallback?.Invoke(line);
-                    }
-
-                    string error = fastboot.stderr.ReadToEnd();
-                    if (!string.IsNullOrEmpty(error))
-                    {
-                        outputCallback?.Invoke($"{error}");
-                    }
-                }
-            });
         }
 
         private void RebootButton_Click(object sender, RoutedEventArgs e)
         {
-            var devices = Fastboot.GetDevices();
+            var devices = Potato.Fastboot.Fastboot.GetDevices();
             if (devices.Length == 0)
             {
                 Log.Text += "未检测到Fastboot设备\n";
@@ -191,7 +225,7 @@ namespace FastbootFlasher
             {
                 Log.Text += "检测到多台设备，请只连接一台设备！\n";
             }
-            Fastboot fastboot = new();
+            Potato.Fastboot.Fastboot fastboot = new();
             fastboot.Connect();
             fastboot.Command("reboot");
             fastboot.Disconnect();
@@ -242,6 +276,18 @@ namespace FastbootFlasher
             Log.ScrollToEnd();
 
         }
+
+
+        private void OpenGit_Click(object sender, RoutedEventArgs e)
+        {
+            Process.Start(new ProcessStartInfo("https://github.com/Natsume324/FastbootFlasher") { UseShellExecute = true });
+        }
+
+        private void OpenQQ_Click(object sender, RoutedEventArgs e)
+        {
+            Process.Start(new ProcessStartInfo("https://qm.qq.com/q/Hnjo84QWUC") { UseShellExecute = true });
+        }
+
     }
 
 

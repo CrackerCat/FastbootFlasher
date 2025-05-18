@@ -110,22 +110,22 @@ namespace FastbootFlasher
         }
         private struct SparseHeader
         {
-            public uint Magic;            // offset 0x00 (4 bytes)
-            public ushort MajorVersion;   // offset 0x04 (2 bytes)
-            public ushort MinorVersion;   // offset 0x06 (2 bytes)
-            public ushort FileHeaderSize; // offset 0x08 (2 bytes)
-            public ushort ChunkHeaderSize;// offset 0x0A (2 bytes)
-            public uint BlockSize;        // offset 0x0C (4 bytes)
-            public uint TotalBlocks;      // offset 0x10 (4 bytes)
-            public uint TotalChunks;      // offset 0x14 (4 bytes)
-            public uint ImageChecksum;    // offset 0x18 (4 bytes)
+            public uint Magic;            
+            public ushort MajorVersion;   
+            public ushort MinorVersion;  
+            public ushort FileHeaderSize; 
+            public ushort ChunkHeaderSize;
+            public uint BlockSize;        
+            public uint TotalBlocks;      
+            public uint TotalChunks;      
+            public uint ImageChecksum;    
         }
         private struct ChunkHeader
         {
-            public ushort ChunkType;      // 2 bytes
-            public ushort Reserved;       // 2 bytes
-            public uint ChunkSize;        // 4 bytes (in blocks)
-            public uint TotalSize;        // 4 bytes (in bytes, including header)
+            public ushort ChunkType;      
+            public ushort Reserved;       
+            public uint ChunkSize;       
+            public uint TotalSize;        
         }
         private static ChunkHeader ReadChunkHeader(BinaryReader reader)
         {
