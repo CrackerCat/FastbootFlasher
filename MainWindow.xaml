@@ -5,12 +5,12 @@
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:local="clr-namespace:FastbootFlasher"
         mc:Ignorable="d"
-        Title="斑•Fastboot刷写者 Ver.1.4" Height="500" Width="700">
+        Title="斑•Fastboot刷写者 Ver.1.5" Height="500" Width="700">
     <Grid>
         <Grid.ColumnDefinitions>
         </Grid.ColumnDefinitions>
-        <TabControl>
-            <TabItem Header="线刷">
+        <TabControl x:Name="Tab">
+            <TabItem x:Name="Tab1" Header="线刷">
                 <Grid Background="#FFE5E5E5">
                     <ListView x:Name="Listview" Margin="10,10,0,0" HorizontalAlignment="Left" VerticalAlignment="Top" Height="281" Width="425">
                         <ListView.View>
@@ -37,7 +37,16 @@
                     <Button Content="预设" HorizontalAlignment="Left" Margin="449,376,0,0" VerticalAlignment="Top" Height="20" Width="50"/>
                     <Button Content="预设" HorizontalAlignment="Left" Margin="624,376,0,0" VerticalAlignment="Top" Height="20" Width="50"/>
                     <Button Content="预设" HorizontalAlignment="Left" Margin="504,376,0,0" VerticalAlignment="Top" Height="20" Width="50"/>
-                    <Button Content="预设" HorizontalAlignment="Left" Margin="565,376,0,0" VerticalAlignment="Top" Height="20" Width="50" Grid.ColumnSpan="3"/>
+                    <Button Content="预设" HorizontalAlignment="Left" Margin="565,376,0,0" VerticalAlignment="Top" Height="20" Width="50"/>
+                </Grid>
+            </TabItem>
+            <TabItem Header="功能">
+                <Grid Background="#FFE5E5E5">
+                    <Label  Content="华为:" HorizontalAlignment="Left" VerticalAlignment="Top" FontSize="16" Height="30" Width="45" Margin="10,93,0,0"/>
+                    <Button x:Name="FbToUp" Content="FB跳转升级模式" HorizontalAlignment="Left" Margin="15,123,0,0" VerticalAlignment="Top" Height="20" Width="100" Click="FbToUp_Click"/>
+                    <Label  Content="通用:" HorizontalAlignment="Left" VerticalAlignment="Top" FontSize="16" Height="30" Width="45" Margin="10,10,0,0"/>
+                    <Button x:Name="UnlockBL" Content="解锁BL" HorizontalAlignment="Left" Margin="15,40,0,0" VerticalAlignment="Top" Height="20" Width="45"/>
+                    <Button x:Name="DisableAvb" Content="关闭AVB" HorizontalAlignment="Left" Margin="65,40,0,0" VerticalAlignment="Top" Height="20" Width="51"/>
                 </Grid>
             </TabItem>
             <TabItem Header="关于">
@@ -45,12 +54,11 @@
                     <Canvas>
                         <Image Height="128" Width="128" Source="/logo.ico" Canvas.Left="115" Canvas.Top="168" HorizontalAlignment="Left" VerticalAlignment="Top"/>
                         <Label  Content="斑•Fastboot刷写者" Canvas.Left="272" Canvas.Top="165" HorizontalAlignment="Left" VerticalAlignment="Center" FontSize="36"/>
-                        <Label  Content="版本：V1.4" Canvas.Left="272" Canvas.Top="222" HorizontalAlignment="Left" VerticalAlignment="Top" FontSize="20"/>
+                        <Label  Content="版本：V1.5" Canvas.Left="272" Canvas.Top="222" HorizontalAlignment="Left" VerticalAlignment="Top" FontSize="20"/>
                         <Label  Content="作者：Natsume324" Canvas.Left="401" Canvas.Top="221" HorizontalAlignment="Left" VerticalAlignment="Top" FontSize="20"/>
                         <Button x:Name="OpenGit" Content="访问源代码" Canvas.Left="280" Canvas.Top="262" HorizontalAlignment="Left" VerticalAlignment="Center" Click="OpenGit_Click" Height="34" Width="153"/>
                         <Button x:Name="OpenQQ"  Content="QQ交流群" Canvas.Left="456" Canvas.Top="262" HorizontalAlignment="Left" VerticalAlignment="Center" Height="34" Width="137" Click="OpenQQ_Click" />
                     </Canvas>
-
                 </Grid>
             </TabItem>
         </TabControl>

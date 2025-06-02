@@ -8,24 +8,21 @@ using FastbootFlasher;
 
 namespace Fastboot
 {
-    class FastbootCli
+    class FastbootCmd
     {
-        Process process;
-        public StreamReader stdout;
-        public StreamReader stderr;
-        public async Task Fastboot(string fbshell)//Fastboot实时输出
+        public async Task Fastboot(string fbshell)
         {
             await Task.Run(() =>
             {
                 string cmd = @".\tools\fastboot.exe";
-                ProcessStartInfo fastboot = new ProcessStartInfo(cmd, fbshell)
+                ProcessStartInfo fastboot = new(cmd, fbshell)
                 {
                     CreateNoWindow = true,
                     UseShellExecute = false,
                     RedirectStandardOutput = true,
                     RedirectStandardError = true
                 };
-                using Process fb = new Process();
+                using Process fb = new();
                 fb.StartInfo = fastboot;
                 _ = fb.Start();
                 fb.ErrorDataReceived += new DataReceivedEventHandler(OutputHandler);
@@ -44,6 +41,7 @@ namespace Fastboot
                 await Application.Current.Dispatcher.InvokeAsync(() =>
                 {
                     MainWindow.Instance.Log.AppendText(outLine.Data + Environment.NewLine);
+                    MainWindow.Instance.Log.ScrollToEnd();
                     MainWindow.Instance.Log.CaretIndex = MainWindow.Instance.Log.Text.Length;
                     string output="";
                     output += outLine.Data + Environment.NewLine;

@@ -1,13 +1,14 @@
-﻿using System;
+﻿using HuaweiUpdateLibrary;
+using HuaweiUpdateLibrary.Core;
+using HuaweiUpdateLibrary.Streams;
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Reflection.PortableExecutable;
 using System.Text;
 using System.Threading.Tasks;
-using HuaweiUpdateLibrary;
-using HuaweiUpdateLibrary.Core;
-using HuaweiUpdateLibrary.Streams;
+using System.Windows.Controls;
 
 namespace FastbootFlasher
 {
@@ -15,7 +16,28 @@ namespace FastbootFlasher
     {
         private const uint SPARSE_HEADER_MAGIC = 0xED26FF3A;
         private const uint DEFAULT_BLOCK_SIZE = 4096;
-        public async Task ExtractPartition(string FilePath, int index, IProgress<double> progress)
+        public static void ReadInfo(string[] FilePaths)
+        {
+            for (int i = 0; i < FilePaths.Length; i++)
+            {
+                var appfile = UpdateFile.Open(FilePaths[i], false);
+                var entry = appfile.Entries[2];
+                Stream dataStream = entry.GetDataStream(FilePaths[i]);
+                StreamReader reader = new(dataStream, Encoding.UTF8);
+                string content = reader.ReadToEnd();
+                MainWindow.Instance.Log.AppendText("版本信息：\n");
+                MainWindow.Instance.Log.Text += content + "\n\r";
+                MainWindow.Instance.Log.ScrollToEnd();
+                for (int a = 0; a < appfile.Entries.Count; a++)
+                {
+                    entry = appfile.Entries[a];
+                    MainWindow.Instance.Listview.Items.Add(new ListViewItem { Num = a, Partitions = entry.FileType.ToLower(), Size = MainWindow.FormatSize(entry.FileSize), Address = "0x" + entry.FileSize.ToString("X8"), SourceFilePath = FilePaths[i] });
+                }
+                MainWindow.Instance.FilePath.Text += FilePaths[i] + "\n";
+                
+            }
+        }
+        public static async Task ExtractPartition(string FilePath, int index)
         {
             var APPFile = UpdateFile.Open(FilePath, false);
             var entry = APPFile.Entries[index];
@@ -43,21 +65,61 @@ namespace FastbootFlasher
                 byte[] buffer = new byte[1024 * 1024];
                 int bytesRead;
 
-                while ((bytesRead = await entryStream.ReadAsync(buffer, 0, buffer.Length)) > 0)
+                while ((bytesRead = await entryStream.ReadAsync(buffer)) > 0)
                 {
                     fileStream.Write(buffer, 0, bytesRead);
                     currentBytes += bytesRead;
 
 
-                    progress?.Report((double)currentBytes / totalSize * 100);
+                    MainWindow.Instance.ProgressBar1.Value = (double)currentBytes / totalSize * 100;
                 }
             }
         }
-        public async Task MergerSuperSparse(string super1 = $@".\images\super.1.img", string super2 = $@".\images\super.2.img", string super = $@".\images\super.img")
+        public static async Task ExtractSelectedPartitions(bool skip=false)
         {
-            using (FileStream fs = new FileStream(super2, FileMode.Open, FileAccess.Read))
-            using (BinaryReader reader = new BinaryReader(fs))
-            using (FileStream outputFs = new FileStream(super, FileMode.Create, FileAccess.Write))
+            foreach (var item in MainWindow.Instance.Listview.SelectedItems.Cast<ListViewItem>())
+            {
+                string partition = item.Partitions;
+                string FilePath = item.SourceFilePath;
+                if (skip==true && MainWindow.Instance.skipPartitions.Contains(partition))
+                {
+                    MainWindow.Instance.Log.Text += $"跳过 {partition} 分区提取！\n\r";
+                    continue;
+                }
+                if (partition == "hisiufs_gpt")
+                    partition = "ptable";
+                if (partition == "ufsfw")
+                    partition = "ufs_fw";
+                MainWindow.Instance.Log.Text += $"正在提取 {partition} 分区...\n";
+                await ExtractPartition(FilePath, item.Num);
+                MainWindow.Instance.Log.Text += $"{partition}分区提取完成！\n\r";
+                MainWindow.Instance.Log.ScrollToEnd();
+            }
+            MainWindow.Instance.Log.Text += $"所有选中分区已提取到images文件夹！\n\r";
+            if (File.Exists($@".\images\super.1.img"))
+            {
+                MainWindow.Instance.Log.Text += "检测到两个super分区，开始合成...\n";
+                await MergerSuperSparse();
+                File.Delete(@".\images\super.1.img");
+                File.Delete(@".\images\super.2.img");
+                MainWindow.Instance.Log.Text += "合成完毕！\n\r";
+            }
+            MainWindow.Instance.Log.ScrollToEnd();
+        }
+        public static async Task MergerSuperSparse(string super1 = $@".\images\super.1.img", string super2 = $@".\images\super.2.img", string super = $@".\images\super.img")
+        {
+            FileInfo file1 = new(super1);
+            FileInfo file2 = new(super2);
+            if (file1.Length > file2.Length)
+            {
+                super1 = $@".\images\super.2.img";
+                super2 = $@".\images\super.1.img";
+
+            }
+                
+            using (FileStream fs = new(super2, FileMode.Open, FileAccess.Read))
+            using (BinaryReader reader = new(fs))
+            using (FileStream outputFs = new(super, FileMode.Create, FileAccess.Write))
             {
                 SparseHeader header = ReadSparseHeader(reader);
                 long lastChunkOffset = 0;
@@ -72,15 +134,15 @@ namespace FastbootFlasher
                 byte[] buffer = new byte[1024*1024];
                 long bytesToRead = lastChunkOffset;
                 int bytesRead;
-                while (bytesToRead > 0 && (bytesRead = await fs.ReadAsync(buffer, 0, (int)Math.Min(buffer.Length, bytesToRead))) > 0)
+                while (bytesToRead > 0 && (bytesRead = await fs.ReadAsync(buffer.AsMemory(0, (int)Math.Min(buffer.Length, bytesToRead)))) > 0)
                 {
-                    await outputFs.WriteAsync(buffer, 0, bytesRead);
+                    await outputFs.WriteAsync(buffer.AsMemory(0, bytesRead));
                     bytesToRead -= bytesRead;
                 }
             }
-            using (FileStream fs = new FileStream(super1, FileMode.Open, FileAccess.Read))
-            using (BinaryReader reader = new BinaryReader(fs))
-            using (FileStream outputFs = new FileStream(super, FileMode.Append, FileAccess.Write))
+            using (FileStream fs = new(super1, FileMode.Open, FileAccess.Read))
+            using (BinaryReader reader = new(fs))
+            using (FileStream outputFs = new(super, FileMode.Append, FileAccess.Write))
             {
                 SparseHeader header = ReadSparseHeader(reader);
 
@@ -91,16 +153,16 @@ namespace FastbootFlasher
                 fs.Seek(newDataOffset, SeekOrigin.Begin);
                 byte[] buffer = new byte[1024 * 1024];
                 int bytesRead;
-                while ((bytesRead = await fs.ReadAsync(buffer, 0, buffer.Length)) > 0)
+                while ((bytesRead = await fs.ReadAsync(buffer)) > 0)
                 {
-                    await outputFs.WriteAsync(buffer, 0, bytesRead);
+                    await outputFs.WriteAsync(buffer.AsMemory(0, bytesRead));
                 }
             }
             SparseHeader header1 = ReadSparseHeader(super1);
             SparseHeader header2 = ReadSparseHeader(super2);
             uint newTotalChunks = (header1.TotalChunks - 1) + (header2.TotalChunks - 1);
-            using (FileStream fs = new FileStream(super, FileMode.Open, FileAccess.Write))
-            using (BinaryWriter writer = new BinaryWriter(fs))
+            using (FileStream fs = new(super, FileMode.Open, FileAccess.Write))
+            using (BinaryWriter writer = new(fs))
             {
                 fs.Seek(0x0C, SeekOrigin.Begin);
                 writer.Write(DEFAULT_BLOCK_SIZE);
@@ -155,11 +217,10 @@ namespace FastbootFlasher
         }
         private static SparseHeader ReadSparseHeader(string filePath)
         {
-            using (FileStream fs = new FileStream(filePath, FileMode.Open, FileAccess.Read))
-            using (BinaryReader reader = new BinaryReader(fs))
-            {
-                return ReadSparseHeader(reader);
-            }
+            using FileStream fs = new(filePath, FileMode.Open, FileAccess.Read);
+            using BinaryReader reader = new(fs);
+            return ReadSparseHeader(reader);
         }
+
     }
 }

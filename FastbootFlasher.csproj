@@ -8,14 +8,17 @@
     <UseWPF>true</UseWPF>
     <ApplicationIcon>logo.ico</ApplicationIcon>
     <ProduceReferenceAssembly>False</ProduceReferenceAssembly>
+    <NoWin32Manifest>true</NoWin32Manifest>
   </PropertyGroup>
 
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|AnyCPU'">
     <DebugType>none</DebugType>
+    <GenerateAssemblyInfo>False</GenerateAssemblyInfo>
   </PropertyGroup>
 
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|AnyCPU'">
     <DebugType>none</DebugType>
+    <GenerateAssemblyInfo>False</GenerateAssemblyInfo>
   </PropertyGroup>
 
   <ItemGroup>
@@ -23,12 +26,36 @@
   </ItemGroup>
 
   <ItemGroup>
+    <PackageReference Include="Google.Protobuf" Version="3.31.1" />
+    <PackageReference Include="SharpCompress" Version="0.39.0" />
+    <PackageReference Include="SharpZipLib" Version="1.4.2" />
+  </ItemGroup>
+
+  <ItemGroup>
     <Reference Include="APPLibrary">
       <HintPath>..\HuaweiUpdateLib\HuaweiUpdateLibrary\bin\Release\APPLibrary.dll</HintPath>
+    </Reference>
+    <Reference Include="PayloadLib">
+      <HintPath>..\PayloadLib\bin\Debug\net8.0\PayloadLib.dll</HintPath>
     </Reference>
     <Reference Include="Potato.Fastboot">
       <HintPath>..\PotatoNV\Potato.Fastboot\Potato.Fastboot\bin\Debug\net472\Potato.Fastboot.dll</HintPath>
     </Reference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Update="Properties\Settings.Designer.cs">
+      <DesignTimeSharedInput>True</DesignTimeSharedInput>
+      <AutoGen>True</AutoGen>
+      <DependentUpon>Settings.settings</DependentUpon>
+    </Compile>
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Update="Properties\Settings.settings">
+      <Generator>SettingsSingleFileGenerator</Generator>
+      <LastGenOutput>Settings.Designer.cs</LastGenOutput>
+    </None>
   </ItemGroup>
 
 </Project>
