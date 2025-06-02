@@ -56,7 +56,7 @@ namespace FastbootFlasher
             Log.Clear();
             Microsoft.Win32.OpenFileDialog openFileDialog = new()
             {
-                Filter = "固件文件|*.app;flash_all.bat;payload.bin",
+                Filter = "固件文件|*.app;payload.bin;flash_all.bat",
                 Multiselect = true,
                 Title = "选择文件"
             };
@@ -95,13 +95,13 @@ namespace FastbootFlasher
                         }
                     }
                 }
-                if (openFileDialog.SafeFileName == "payload.bin")
+                else if(openFileDialog.SafeFileName == "payload.bin")
                 {
                     PayloadProcess.ReadInfo(openFileDialog.FileName);
                 }
                 else
                 {
-                    APPProcess.ReadInfo(openFileDialog.FileNames); 
+                    APPProcess.ReadInfo(openFileDialog.FileNames);
                 }
             }
 
@@ -155,7 +155,7 @@ namespace FastbootFlasher
                     Log.ScrollToEnd();
                 }
             }
-            if (FilePath.Text.EndsWith("payload.bin"))
+            else if (FilePath.Text.EndsWith("payload.bin"))
             {
                 response = fastboot.Command("oem device-info");
                 Log.Text += $"{response.Payload}";
@@ -249,7 +249,7 @@ namespace FastbootFlasher
             {
                return; 
             }
-            if (FilePath.Text.EndsWith("payload.bin"))
+            else if (FilePath.Text.EndsWith("payload.bin"))
             {
                 Listview.IsEnabled = false;
                 await PayloadProcess.ExtractSelectedPartitions();
