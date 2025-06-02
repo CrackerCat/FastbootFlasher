@@ -3,14 +3,14 @@
 目前支持的固件：  
 华为：UPDATE.APP OTA 更新文件  
 安卓：标准OTA固件payload.bin  
-小米：payload.bin OTA 更新文件  
-红米：payload.bin OTA 更新文件  
+小米：payload.bin OTA 更新文件 线刷bat脚本  
+红米：payload.bin OTA 更新文件 线刷bat脚本  
 OPPO：payload.bin OTA 更新文件  
 一加：payload.bin OTA 更新文件  
 真我：payload.bin OTA 更新文件  
   
 目前支持的功能：  
-华为：解析与提取.APP文件中的分区镜像，选择分区刷写，fastboot模式跳转升级模式  
+华为：解析与提取.APP文件中的分区镜像，合并双super分区，选择分区刷写，fastboot模式跳转升级模式  
 安卓：解析与提取payload.bin固件中的分区镜像，选择分区刷写  
 小米：解析小米线刷固件的flash_all.bat脚本，提取payload.bin固件中的分区镜像，选择分区刷写  
 红米：解析小米线刷固件的flash_all.bat脚本，提取payload.bin固件中的分区镜像，选择分区刷写  
