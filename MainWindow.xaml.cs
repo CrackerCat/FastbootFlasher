@@ -1,24 +1,13 @@
-﻿using Fastboot;
-using Google.Protobuf;
-using Google.Protobuf.WellKnownTypes;
-using HuaweiUpdateLibrary;
-using HuaweiUpdateLibrary.Core;
-using HuaweiUpdateLibrary.Streams;
-using Potato.Fastboot;
-using System;
+﻿using HuaweiUpdateLibrary.Core;
+using SharpCompress.Common;
 using System.Collections.Concurrent;
-using System.Collections.Generic;
+using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
-using System.IO.Compression;
-using System.IO.Pipes;
-using System.Net;
-using System.Reflection;
-using System.Reflection.Metadata;
+using System.Security.Policy;
 using System.Text;
 using System.Text.RegularExpressions;
-using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Data;
@@ -27,9 +16,7 @@ using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Navigation;
-using System.Windows.Shapes;
-using ICSharpCode.SharpZipLib.BZip2;
-using SharpCompress.Compressors.Xz;
+
 
 namespace FastbootFlasher
 {
@@ -38,37 +25,51 @@ namespace FastbootFlasher
     /// </summary>
     public partial class MainWindow : Window
     {
-        public static MainWindow Instance { get; private set; }
+        private dynamic langModel;
+        public ObservableCollection<ListViewItem> Items { get; }
+            = new ObservableCollection<ListViewItem>();
+        public static ProgressBar pb;
         public string[] skipPartitions = ["sha256rsa", "crc", "curver", "verlist", "package_type", "base_verlist", "base_ver", "ptable_cust", "cust_verlist", "cust_ver", "preload_verlist", "preload_ver", "ptable_preload"];
+
+
         public MainWindow()
         {
             InitializeComponent();
-            Instance = this;
-            Log.IsReadOnly = true;
-            FilePath.IsReadOnly = true;
-
+            string iniPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "lang.ini");
+            langModel = new DynamicLanguageModel(iniPath);
+            DataContext = langModel;
+            LangList.ItemsSource = langModel.AvailableLanguages;
+            if (langModel.AvailableLanguages.Contains("zh"))
+                LangList.SelectedItem = "zh";
+            else
+                LangList.SelectedIndex = 0;
+            PartitionList.ItemsSource = Items;
+            this.ProgressBar.SetBinding(System.Windows.Controls.ProgressBar.ValueProperty,
+                new Binding("Value") { Source = pb = new ProgressBar() });
         }
 
-        private void LoadFile_Click(object sender, RoutedEventArgs e)
+       
+
+        private void LoadButton_Click(object sender, RoutedEventArgs e)
         {
-            Listview.Items.Clear();
-            FilePath.Clear();
-            Log.Clear();
+            Items.Clear();
+            FilePathBox.Clear();
+            LogBox.Clear();
             Microsoft.Win32.OpenFileDialog openFileDialog = new()
             {
-                Filter = "固件文件|*.app;payload.bin;flash_all.bat",
+                Filter = langModel.Firmware+"|*.app;payload.bin;flash_all.bat",
                 Multiselect = true,
-                Title = "选择文件"
+                Title = langModel.SelectFile
             };
 
             if (openFileDialog.ShowDialog() == true)
             {
                 if (openFileDialog.SafeFileName == "flash_all.bat")
                 {
-                    FilePath.Text += openFileDialog.FileName;
+                    FilePathBox.Text += openFileDialog.FileName;
                     string[] lines = File.ReadAllLines(openFileDialog.FileName);
                     Regex flashRegex = new(@"\bflash\s+(\w+)\s+(?:%~dp0)?images[\\/]([\w\.\-\\/]+)(?=\s|\|)", RegexOptions.IgnoreCase);
-                    int i=0;
+                    int i = 0;
                     foreach (string line in lines)
                     {
                         Match match = flashRegex.Match(line);
@@ -87,150 +88,63 @@ namespace FastbootFlasher
                             }
                             string imgName = match.Groups[2].Value.Replace("\\", "/");
                             string batPath = openFileDialog.FileName[..^13];
-                            string imgPath= @$"{batPath}images\{imgName}";
+                            string imgPath = @$"{batPath}images\{imgName}";
                             FileInfo fileInfo = new(imgPath);
                             long imgSize = fileInfo.Length;
-
-                            Listview.Items.Add(new ListViewItem { Num = i, Size = FormatSize(imgSize), Address = "0x" + imgSize.ToString("X8"),Partitions = partitionName, SourceFilePath = imgPath });
+                            Items.Add(new ListViewItem { Num = i, Size = FormatSize(imgSize), Addr = "0x" + imgSize.ToString("X8"), Part = partitionName, Source = imgPath });
                         }
                     }
                 }
-                else if(openFileDialog.SafeFileName == "payload.bin")
+                else if (openFileDialog.SafeFileName == "payload.bin")
                 {
-                    PayloadProcess.ReadInfo(openFileDialog.FileName);
+                    var entries = PayloadFile.ParsePayloadFile(openFileDialog.FileName);
+                    foreach (var entry in entries)
+                    {
+                        Items.Add(entry);
+                    }
+
+                    FilePathBox.Text += $"{openFileDialog.FileName}";
+                    string rootDir = Path.GetDirectoryName(FilePathBox.Text)!;
+
+                    string[] found = Directory.GetFiles(rootDir, "metadata", SearchOption.AllDirectories);
+
+                    if (found.Length > 0)
+                    {
+                        string metadataPath = found[0];
+                        LogBox.Text+= langModel.Log_FoundMetadata+"\n";
+                        string[] lines = File.ReadAllLines(metadataPath);
+
+                        var metadata = new MetadataInfo(metadataPath);
+                        LogBox.Text += langModel.Metadata_Model+metadata.ProductName + "\n"+
+                                       langModel.Metadata_AndroidVer + metadata.AndroidVersion+"\n"+
+                                       langModel.Metadata_SecurePatch + metadata.SecurityPatch + "\n"+
+                                       langModel.Metadata_Version + metadata.VersionName;
+                    }
+                    else
+                    {
+                        LogBox.Text += langModel.Log_MetadataNotFound+"\n\r";
+                    }
                 }
                 else
-                {
-                    APPProcess.ReadInfo(openFileDialog.FileNames);
-                }
-            }
-
-        }
-
-        private async void Flash_Click(object sender, RoutedEventArgs e)
-        {
-            if (Listview.SelectedItems.Count == 0)
-            {
-                MessageBox.Show("未选择分区！", "提示", MessageBoxButton.OK, MessageBoxImage.Warning);
-                return;
-
-            }
-            var devices = Potato.Fastboot.Fastboot.GetDevices();
-            if (devices.Length == 0)
-            {
-                Log.Text += "未检测到Fastboot设备\n";
-                return;
-            }
-            if (devices.Length > 1)
-            {
-                Log.Text += "检测到多台设备，请只连接一台设备！\n";
-                return;
-            }
-            Log.Text += $"已检测到设备：{string.Join(", ", devices)}\n";
-            Potato.Fastboot.Fastboot fastboot = new();
-            FastbootCmd fb = new();
-            Log.Text += "连接设备...\n";
-            fastboot.Connect();
-            Log.Text += $"已连接到设备：{fastboot.GetSerialNumber()}\n\r";
-            Log.Text += "读取设备解锁状态...\n";
-            Potato.Fastboot.Fastboot.Response response;
-            if (FilePath.Text.EndsWith("flash_all.bat"))
-            {
-                response = fastboot.Command("oem device-info");
-                Log.Text += $"{response.Payload}";
-                fastboot.Disconnect();
-
-                Flash.IsEnabled = false;
-                RebootButton.IsEnabled = false;
-                Flash.Content="刷写中...";
-                Listview.IsEnabled = false;
-
-                foreach (var item in Listview.SelectedItems.Cast<ListViewItem>())
-                {
-                    string partition = item.Partitions;
-                    string FilePath = item.SourceFilePath;
-                    Log.Text += $"正在刷入 {partition} 分区...\n";
-                    await fb.Fastboot($@"flash {partition} {FilePath}");
-                    Log.Text += $"刷入 {partition} 完成！\n\r";
-                    Log.ScrollToEnd();
-                }
-            }
-            else if (FilePath.Text.EndsWith("payload.bin"))
-            {
-                response = fastboot.Command("oem device-info");
-                Log.Text += $"{response.Payload}";
-                fastboot.Disconnect();
-                Listview.IsEnabled = false;
-                await PayloadProcess.ExtractSelectedPartitions();
-                Flash.IsEnabled = false;
-                RebootButton.IsEnabled = false;
-                Flash.Content = "刷写中...";
-                Listview.IsEnabled = false;
-                foreach (var item in Listview.SelectedItems.Cast<ListViewItem>())
-                {
-                    string partition = item.Partitions;
-                    Log.Text += $"正在刷入 {partition} 分区...\n";
-                    await fb.Fastboot($@"flash {partition} .\images\{partition}.img");
-                    File.Delete($@".\images\{partition}.img");
-                    Log.Text += $"刷入 {partition} 完成！\n\r";
-                    Log.ScrollToEnd();
-                }
-            }
-            else
-            {
-                response = fastboot.Command("oem lock-state info");
-                Log.Text += $"{response.Payload}";
-                fastboot.Disconnect();
-                Listview.IsEnabled = false;
-                await APPProcess.ExtractSelectedPartitions(true);
-                RebootButton.IsEnabled = false;
-                Flash.IsEnabled = false;
-                Flash.Content = "刷写中...";
-                foreach (var item in Listview.SelectedItems.Cast<ListViewItem>())
-                {
-                    string partition = item.Partitions;
-                    if (skipPartitions.Contains(partition))
+                    foreach (var filePath in openFileDialog.FileNames)
                     {
-                        Log.Text += $"跳过刷入{partition}分区\n\r";
-                        continue;
+                        var entries = APPFile.ParseAPPFile(filePath, out var versionInfo);
+
+                        
+                        LogBox.AppendText(langModel.Log_VersionInfo+$"\n{versionInfo}\n");
+                        LogBox.ScrollToEnd();
+
+                        foreach (var entry in entries)
+                        {
+                            Items.Add(entry);
+                        }
+
+                        FilePathBox.Text += $"{filePath}\n";
                     }
-                    Log.Text += $"正在刷入 {partition} 分区...\n";
-                    if (partition == "hisiufs_gpt") partition = "ptable";
-                    if (partition == "ufsfw") partition = "ufs_fw";
-                    if (partition == "super") if (!File.Exists($@".\images\super.img")) continue;
-                    await fb.Fastboot($@"flash {partition} .\images\{partition}.img");
-                    File.Delete($@".\images\{partition}.img");
-                    Log.Text += $"刷入 {partition} 完成！\n\r";
-                    Log.ScrollToEnd();
-                }
-            }     
-            Listview.IsEnabled = true;
-            RebootButton.IsEnabled = true;
-            Flash.Content = "刷写";
-            Flash.IsEnabled = true;
-            Log.Text += $"所有选中分区刷写完成！\n\r";
-            Log.ScrollToEnd();
-        }
-
-        private void RebootButton_Click(object sender, RoutedEventArgs e)
-        {
-            var devices = Potato.Fastboot.Fastboot.GetDevices();
-            if (devices.Length == 0)
-            {
-                Log.Text += "未检测到Fastboot设备\n";
-                return;
             }
-            if (devices.Length > 1)
-            {
-                Log.Text += "检测到多台设备，请只连接一台设备！\n";
-            }
-            Potato.Fastboot.Fastboot fastboot = new();
-            fastboot.Connect();
-            fastboot.Command("reboot");
-            fastboot.Disconnect();
-            Log.Text += "重启完成！\n\r";
-        }
 
+        }
+        
         public static string FormatSize(long size)
         {
             if (size < 1024)
@@ -243,48 +157,608 @@ namespace FastbootFlasher
                 return $"{size / (1024.0 * 1024.0 * 1024.0):F2}GB";
         }
 
-        private async void MenuItemExtractSelected_Click(object sender, RoutedEventArgs e)
+        private async void ExtractButton_Click(object sender, RoutedEventArgs e)
         {
-            if (FilePath.Text.EndsWith("flash_all.bat"))
+
+            if (FilePathBox.Text.EndsWith("flash_all.bat"))
+                return;
+            else if (FilePathBox.Text.EndsWith("payload.bin"))
+                await PayExtractParts();
+            else
+                await APPExtractParts();
+        }
+
+        private async Task APPExtractParts(bool skip=false)
+        {
+            DisabledControls();
+            foreach (var item in PartitionList.SelectedItems.Cast<ListViewItem>())
             {
-               return; 
+                string partition = item.Part;
+                string FilePath = item.Source;
+                if (skip == true && skipPartitions.Contains(partition))
+                {
+                    LogBox.Text += string.Format(langModel.Log_SkipExtract, partition) + "\n\r";
+                    continue;
+                }
+                if (partition == "hisiufs_gpt")
+                    partition = "ptable";
+                if (partition == "ufsfw")
+                    partition = "ufs_fw";
+                LogBox.Text += string.Format(langModel.Log_ExtractingPartition, partition);
+                await APPFile.ExtractPartition(FilePath, item.Num);
+                LogBox.ScrollToEnd();
+                LogBox.Text += "   "+langModel.Log_Success + "\n\r";
+                
             }
-            else if (FilePath.Text.EndsWith("payload.bin"))
+            LogBox.Text += langModel.Log_AllExtracted + "\n\r";
+            if (File.Exists($@".\images\super.1.img"))
             {
-                Listview.IsEnabled = false;
-                await PayloadProcess.ExtractSelectedPartitions();
+                LogBox.Text += langModel.Log_MergingSuper; 
+                await APPFile.MergerSuperSparse();
+                LogBox.Text += "   " + langModel.Log_Success + "\n\r";
+                File.Delete(@".\images\super.1.img");
+                File.Delete(@".\images\super.2.img");
+                
+            }
+            LogBox.ScrollToEnd();
+            EnabledControls();
+        }
+
+        private async Task PayExtractParts()
+        {
+            DisabledControls();
+            var tasks = new List<Task>();
+            foreach (var item in PartitionList.SelectedItems.Cast<ListViewItem>())
+            {
+                string partition = item.Part;
+                string FilePath = item.Source;
+                LogBox.Text += string.Format(langModel.Log_ExtractingPartition, partition) + "\n\r";
+                
+                tasks.Add(Task.Run(async () =>
+                {
+                    await PayloadFile.ExtractPartition(FilePath, item.Num);
+                    Dispatcher.Invoke(() =>
+                    {
+                        LogBox.Text += string.Format(langModel.Log_ExtractSuccess, partition) + "\n\r";
+                        LogBox.ScrollToEnd();
+                    });
+                }));
+            }
+            await Task.WhenAll(tasks);
+            LogBox.Text += langModel.Log_AllExtracted + "\n\r";
+            LogBox.ScrollToEnd();
+            EnabledControls();
+        }
+
+        private async void FlashButton_Click(object sender, RoutedEventArgs e)
+        {
+            int sum;
+            int fail=0;
+            int okay=0;
+            LogBox.Text += langModel.Log_DetectingDevice;
+            string outText = await FastbootCmd.Command("devices");
+
+            
+            var lines = outText.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries)
+                .Where(line => line.Contains("fastboot"))
+                .ToList();
+
+            if (lines.Count == 0)
+            {
+                LogBox.Text += "\n"+langModel.Log_DeviceNotFound+"\n\r";
+                LogBox.ScrollToEnd();
+                return;
+            }
+            else if (lines.Count > 1)
+            {
+                LogBox.Text += "   " + langModel.Log_Success + "\n";
+                foreach (var line in lines)
+                {
+                    LogBox.Text += line + "\n";
+                }
+                LogBox.Text += langModel.Log_MultipleDevices + "\n\r";
+                LogBox.ScrollToEnd();
+                return;
             }
             else
             {
-                Listview.IsEnabled = false;
-                await APPProcess.ExtractSelectedPartitions();
+                LogBox.Text += "   " + langModel.Log_Success + "\n";
+                LogBox.Text += lines[0] + "\n\r";
+                LogBox.ScrollToEnd();
+
+                if (PartitionList.SelectedItems.Count == 0)
+                {
+                    MessageBox.Show(langModel.Log_NoPartitionSelected, langModel.Log_NoPartitionSelected, MessageBoxButton.OK, MessageBoxImage.Warning);
+                    return;
+                }
+                LogBox.Text += langModel.Log_ReadingLockState + "\n";
+                if (FilePathBox.Text.EndsWith("flash_all.bat"))
+                {
+                    outText = await FastbootCmd.Command("oem device-info");
+                    LogBox.Text += outText+"\n";
+                    DisabledControls();
+                    sum = PartitionList.SelectedItems.Count;
+                    foreach (var item in PartitionList.SelectedItems.Cast<ListViewItem>())
+                    {
+                        string partition = item.Part;
+                        string FilePath = item.Source;
+                        LogBox.Text += string.Format(langModel.Log_FlashingPartition, partition) + "\n";
+                        outText=await FastbootCmd.Command($@"flash {partition} {FilePath}");
+                        LogBox.Text += outText;
+                        if (outText.Contains("Command failed"))
+                        {
+                            LogBox.Text += string.Format(langModel.Log_FlashFail, partition) + "\n\r";
+                            fail++;
+                        }
+                        else if(outText.Contains("Finished"))
+                        {
+                            LogBox.Text += string.Format(langModel.Log_FlashSuccess, partition) + "\n\r";
+                            okay++;
+                        }
+                        LogBox.ScrollToEnd();
+                    }
+                }
+                else if (FilePathBox.Text.EndsWith("payload.bin"))
+                {
+                    outText = await FastbootCmd.Command("oem device-info");
+                    LogBox.Text += outText + "\n";
+                    DisabledControls();
+                    await PayExtractParts();
+                    sum = PartitionList.SelectedItems.Count;
+                    foreach (var item in PartitionList.SelectedItems.Cast<ListViewItem>())
+                    {
+                        string partition = item.Part;
+                        LogBox.Text += string.Format(langModel.Log_FlashingPartition, partition) + "\n";
+                        outText=await FastbootCmd.Command($@"flash {partition} .\images\{partition}.img");
+                        LogBox.Text += outText;
+                        if (outText.Contains("Command failed"))
+                        {
+                            LogBox.Text += string.Format(langModel.Log_FlashFail, partition) + "\n\r";
+                            fail++;
+                        }
+                        else if(outText.Contains("Finished"))
+                        {
+                            LogBox.Text += string.Format(langModel.Log_FlashSuccess, partition) + "\n\r";
+                            okay++;
+                        }
+                        File.Delete($@".\images\{partition}.img");
+                        LogBox.ScrollToEnd();
+                    }
+                }
+                else
+                {
+                    outText = await FastbootCmd.Command("oem lock-state info");
+                    LogBox.Text += outText + "\n";
+                    DisabledControls();
+                    await APPExtractParts(true);
+                    sum = PartitionList.SelectedItems.Count;
+                    foreach (var item in PartitionList.SelectedItems.Cast<ListViewItem>())
+                    {
+                        string partition = item.Part;
+                        if (skipPartitions.Contains(partition))
+                        {
+                            LogBox.Text += string.Format(langModel.Log_SkipFlash, partition) + "\n\r";
+                            okay++;
+                            continue;
+                        }
+
+                        if (partition == "hisiufs_gpt")
+                        {
+                            partition = "ptable";
+                            LogBox.Text += string.Format(langModel.Log_ErasingPartition, partition) + "\n";
+                            outText=await FastbootCmd.Command("erase ptable");
+                            LogBox.Text += outText + "\n";
+                            if (outText.Contains("Command failed"))
+                            {
+                                LogBox.Text += string.Format(langModel.Log_EraseFail, partition) + "\n\r";
+                            }
+                            else if (outText.Contains("Finished"))
+                            {
+                                LogBox.Text += string.Format(langModel.Log_EraseSuccess, partition) + "\n\r";
+                            }
+                        }
+                        if (partition == "ufsfw") partition = "ufs_fw";
+                        if (partition == "super")
+                        {
+                            if (!File.Exists($@".\images\super.img"))
+                            {
+                                continue;
+                            }
+                            LogBox.Text += string.Format(langModel.Log_ErasingPartition, partition) + "\n";
+                            outText = await FastbootCmd.Command("erase super");
+                            LogBox.Text += outText + "\n";
+                            if (outText.Contains("Command failed"))
+                            {
+                                LogBox.Text += string.Format(langModel.Log_EraseFail, partition) + "\n\r";
+                            }
+                            else if (outText.Contains("Finished"))
+                            {
+                                LogBox.Text += string.Format(langModel.Log_EraseSuccess, partition) + "\n\r";
+                            }
+                        }
+                        LogBox.Text += "\n"+ string.Format(langModel.Log_FlashingPartition, partition) + "\n";
+                        outText = await FastbootCmd.Command($@"flash {partition} .\images\{partition}.img");
+                        LogBox.Text += outText;
+                        if (outText.Contains("Command failed"))
+                        {
+                            LogBox.Text += string.Format(langModel.Log_FlashFail, partition) + "\n\r";
+                            fail++;
+                        }
+                        else if (outText.Contains("Finished"))
+                        {
+                            LogBox.Text += string.Format(langModel.Log_FlashSuccess, partition) + "\n\r";
+                            okay++;
+                        }
+                        File.Delete($@".\images\{partition}.img");
+                        LogBox.ScrollToEnd();
+                    }
+                }
+                EnabledControls();
+                LogBox.Text += string.Format(langModel.Log_Summary, sum, okay, fail) + "！\n\r";
+                LogBox.ScrollToEnd();
             }
-            Listview.IsEnabled = true;
-
         }
 
-        private void OpenGit_Click(object sender, RoutedEventArgs e)
+        private async void RebootButton_Click(object sender, RoutedEventArgs e)
         {
-            Process.Start(new ProcessStartInfo("https://github.com/Natsume324/FastbootFlasher") { UseShellExecute = true });
-        }
-
-        private void OpenQQ_Click(object sender, RoutedEventArgs e)
-        {
-            Process.Start(new ProcessStartInfo("https://qm.qq.com/q/Hnjo84QWUC") { UseShellExecute = true });
-        }
-
-        private async void FbToUp_Click(object sender, RoutedEventArgs e)
-        {
-            if(this.FilePath.Text == "" || this.FilePath.Text.EndsWith("flash_all.bat") || this.FilePath.Text.EndsWith("payload.bin"))
+            LogBox.Text += langModel.Log_DetectingDevice;
+            string outText = await FastbootCmd.Command("devices");
+            var lines = outText.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries)
+                .Where(line => line.Contains("fastboot"))
+                .ToList();
+            if (lines.Count == 0)
             {
-                MessageBox.Show("请先选择华为固件文件！", "提示", MessageBoxButton.OK, MessageBoxImage.Warning);
-                this.Tab.SelectedItem = this.Tab1;
+                LogBox.Text += "\n" + langModel.Log_DeviceNotFound + "\n\r";
+                LogBox.ScrollToEnd();
+                return;
+            }
+            else if (lines.Count > 1)
+            {
+                LogBox.Text += "   " + langModel.Log_Success + "\n";
+                foreach (var line in lines)
+                {
+                    LogBox.Text += line + "\n";
+                }
+                LogBox.Text += langModel.Log_MultipleDevices + "\n\r";
+                LogBox.ScrollToEnd();
+                return;
+            }
+            else
+            {
+                LogBox.Text += "   " + langModel.Log_Success + "\n";
+                LogBox.Text += lines[0] + "\n\r";
+                LogBox.ScrollToEnd();
+                outText = await FastbootCmd.Command("reboot");
+                LogBox.Text += outText;
+                if (outText.Contains("Command failed"))
+                {
+                    LogBox.Text += langModel.Log_RebootFail+ "\n\r";
+                }
+                else if (outText.Contains("Finished"))
+                {
+                    LogBox.Text += langModel.Log_RebootSuccess + "\n\r";
+                }
+                LogBox.ScrollToEnd();
+            }
+        }
+
+        private void DisabledControls()
+        {
+            PartitionList.IsEnabled = false;
+            FlashButton.IsEnabled = false;
+            RebootButton.IsEnabled = false;
+            LoadButton.IsEnabled = false;
+
+        }
+        private void EnabledControls()
+        {
+            PartitionList.IsEnabled = true;
+            FlashButton.IsEnabled = true;
+            RebootButton.IsEnabled = true;
+            LoadButton.IsEnabled = true;
+        }
+        private void LangList_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        {
+            if (LangList.SelectedItem is string selectedLang)
+            {
+                langModel.SetLanguage(selectedLang);
+            }
+        }
+        private void Hyperlink_RequestNavigate(object sender, RequestNavigateEventArgs e)
+        {
+            Process.Start(new ProcessStartInfo(e.Uri.AbsoluteUri)
+            {
+                UseShellExecute = true
+            });
+            e.Handled = true;
+        }
+
+        private async void ToBLButton_Click(object sender, RoutedEventArgs e)
+        {
+            Tab.SelectedItem = TabMain;
+            LogBox.Text += langModel.Log_DetectingDevice;
+            string outText = await FastbootCmd.Command("devices");
+            var lines = outText.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries)
+                .Where(line => line.Contains("fastboot"))
+                .ToList();
+            if (lines.Count == 0)
+            {
+                LogBox.Text += "\n" + langModel.Log_DeviceNotFound + "\n\r";
+                LogBox.ScrollToEnd();
+                return;
+            }
+            else if (lines.Count > 1)
+            {
+                LogBox.Text += "   " + langModel.Log_Success + "\n";
+                foreach (var line in lines)
+                {
+                    LogBox.Text += line + "\n";
+                }
+                LogBox.Text += langModel.Log_MultipleDevices + "\n\r";
+                LogBox.ScrollToEnd();
+                return;
+            }
+            else
+            {
+                LogBox.Text += "   " + langModel.Log_Success + "\n";
+                LogBox.Text += lines[0] + "\n\r";
+                LogBox.ScrollToEnd();
+                outText = await FastbootCmd.Command("reboot bootloader");
+                LogBox.Text += outText;
+                if (outText.Contains("Command failed"))
+                {
+                    LogBox.Text += langModel.Log_EnterFail + "\n\r";
+                }
+                else if (outText.Contains("Finished"))
+                {
+                    LogBox.Text += langModel.Log_EnterSuccess + "\n\r";
+                }
+                LogBox.ScrollToEnd();
+            }
+        }
+
+        private async void ToFBDButton_Click(object sender, RoutedEventArgs e)
+        {
+            Tab.SelectedItem = TabMain;
+            LogBox.Text += langModel.Log_DetectingDevice;
+            string outText = await FastbootCmd.Command("devices");
+            var lines = outText.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries)
+                .Where(line => line.Contains("fastboot"))
+                .ToList();
+            if (lines.Count == 0)
+            {
+                LogBox.Text += "\n" + langModel.Log_DeviceNotFound + "\n\r";
+                LogBox.ScrollToEnd();
+                return;
+            }
+            else if (lines.Count > 1)
+            {
+                LogBox.Text += "   " + langModel.Log_Success + "\n";
+                foreach (var line in lines)
+                {
+                    LogBox.Text += line + "\n";
+                }
+                LogBox.Text += langModel.Log_MultipleDevices + "\n\r";
+                LogBox.ScrollToEnd();
+                return;
+            }
+            else
+            {
+                LogBox.Text += "   " + langModel.Log_Success + "\n";
+                LogBox.Text += lines[0] + "\n\r";
+                LogBox.ScrollToEnd();
+                outText = await FastbootCmd.Command("reboot fastboot");
+                LogBox.Text += outText;
+                if (outText.Contains("Command failed"))
+                {
+                    LogBox.Text += langModel.Log_EnterFail + "\n\r";
+                }
+                else if (outText.Contains("Finished"))
+                {
+                    LogBox.Text += langModel.Log_EnterSuccess + "\n\r";
+                }
+                LogBox.ScrollToEnd();
+            }
+        }
+
+        private async void UnBLButton_Click(object sender, RoutedEventArgs e)
+        {
+            Tab.SelectedItem = TabMain;
+            LogBox.Text += langModel.Log_DetectingDevice;
+            string outText = await FastbootCmd.Command("devices");
+            var lines = outText.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries)
+                .Where(line => line.Contains("fastboot"))
+                .ToList();
+            if (lines.Count == 0)
+            {
+                LogBox.Text += "\n" + langModel.Log_DeviceNotFound + "\n\r";
+                LogBox.ScrollToEnd();
+                return;
+            }
+            else if (lines.Count > 1)
+            {
+                LogBox.Text += "   " + langModel.Log_Success + "\n";
+                foreach (var line in lines)
+                {
+                    LogBox.Text += line + "\n";
+                }
+                LogBox.Text += langModel.Log_MultipleDevices + "\n\r";
+                LogBox.ScrollToEnd();
+                return;
+            }
+            else
+            {
+                LogBox.Text += "   " + langModel.Log_Success + "\n";
+                LogBox.Text += lines[0] + "\n\r";
+                LogBox.ScrollToEnd();
+                LogBox.Text += langModel.Log_ExecUnlock + "\n";
+                LogBox.Text += langModel.Log_SelectUnlock + "\n";
+                outText = await FastbootCmd.Command("flashing unlock");
+                LogBox.Text += outText;
+                if (outText.Contains("Command failed"))
+                {
+                    LogBox.Text += langModel.Log_ExecFail + "\n\r";
+                }
+                else if (outText.Contains("Finished"))
+                {
+                    LogBox.Text += langModel.Log_ExecSuccess + "\n\r";
+                    MessageBoxResult result = MessageBox.Show(
+                        langModel.Message_Content,
+                        langModel.Log_Tips,                        
+                        MessageBoxButton.YesNo,           
+                        MessageBoxImage.Question,        
+                        MessageBoxResult.No             
+                    );
+
+                    if (result == MessageBoxResult.Yes)
+                    {
+                        LogBox.Text += langModel.Log_ExecCritical + "\n";
+                        LogBox.Text += langModel.Log_SelectUnlock + "\n";
+                        outText = await FastbootCmd.Command("flashing unlock_critical");
+                        LogBox.Text += outText;
+                        if (outText.Contains("Command failed"))
+                        {
+                            LogBox.Text += langModel.Log_ExecFail + "\n\r";
+                        }
+                        else if (outText.Contains("Finished"))
+                        {
+                            LogBox.Text += langModel.Log_ExecSuccess + "\n\r";
+                        }
+                    }
+                }
+                LogBox.ScrollToEnd();
+            }
+        }
+
+        private async void ReadBLButton_Click(object sender, RoutedEventArgs e)
+        {
+            Tab.SelectedItem = TabMain;
+            LogBox.Text += langModel.Log_DetectingDevice;
+            string outText = await FastbootCmd.Command("devices");
+            var lines = outText.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries)
+                .Where(line => line.Contains("fastboot"))
+                .ToList();
+            if (lines.Count == 0)
+            {
+                LogBox.Text += "\n" + langModel.Log_DeviceNotFound + "\n\r";
+                LogBox.ScrollToEnd();
+                return;
+            }
+            else if (lines.Count > 1)
+            {
+                LogBox.Text += "   " + langModel.Log_Success + "\n";
+                foreach (var line in lines)
+                {
+                    LogBox.Text += line + "\n";
+                }
+                LogBox.Text += langModel.Log_MultipleDevices + "\n\r";
+                LogBox.ScrollToEnd();
+                return;
+            }
+            else
+            {
+                LogBox.Text += "   " + langModel.Log_Success + "\n";
+                LogBox.Text += lines[0] + "\n\r";
+                LogBox.ScrollToEnd();
+                outText = await FastbootCmd.Command("oem device-info");
+                LogBox.Text += outText;
+                if (outText.Contains("Command failed"))
+                {
+                    LogBox.Text += langModel.Log_ReadFail + "\n\r";
+                }
+                else if (outText.Contains("Finished"))
+                {
+                    LogBox.Text += langModel.Log_ReadSuccess + "\n\r";
+                }
+                LogBox.ScrollToEnd();
+            }
+        }
+
+        private async void ReadInfoButton_Click(object sender, RoutedEventArgs e)
+        {
+            Tab.SelectedItem = TabMain;
+            LogBox.Text += langModel.Log_DetectingDevice;
+            string outText = await FastbootCmd.Command("devices");
+            var lines = outText.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries)
+                .Where(line => line.Contains("fastboot"))
+                .ToList();
+            if (lines.Count == 0)
+            {
+                LogBox.Text += "\n" + langModel.Log_DeviceNotFound + "\n\r";
+                LogBox.ScrollToEnd();
+                return;
+            }
+            else if (lines.Count > 1)
+            {
+                LogBox.Text += "   " + langModel.Log_Success + "\n";
+                foreach (var line in lines)
+                {
+                    LogBox.Text += line + "\n";
+                }
+                LogBox.Text += langModel.Log_MultipleDevices + "\n\r";
+                LogBox.ScrollToEnd();
+                return;
+            }
+            else
+            {
+                LogBox.Text += "   " + langModel.Log_Success + "\n";
+                LogBox.Text += lines[0] + "\n\r";
+                LogBox.ScrollToEnd();
+                LogBox.Text += langModel.HW_Model + "\n";
+                outText = await FastbootCmd.Command("getvar devicemodel");
+                LogBox.Text += outText+"\n";
+                LogBox.ScrollToEnd();
+                LogBox.Text += langModel.HW_VendorCountry + "\n";
+                outText = await FastbootCmd.Command("getvar vendorcountry");
+                LogBox.Text += outText+"\n";
+                LogBox.ScrollToEnd();
+                LogBox.Text += langModel.HW_CPU + "\n";
+                outText = await FastbootCmd.Command("getvar preoduct");
+                LogBox.Text += outText + "\n";
+                LogBox.ScrollToEnd();
+                LogBox.Text += langModel.HW_LockState + "\n";
+                outText = await FastbootCmd.Command("oem lock-state info");
+                LogBox.Text += outText + "\n";
+                LogBox.ScrollToEnd();
+                LogBox.Text += langModel.HW_Version + "\n";
+                outText = await FastbootCmd.Command("oem get-build-number");
+                LogBox.Text += outText + "\n";
+                LogBox.ScrollToEnd();
+                LogBox.Text += langModel.HW_AndroidVer + "\n";
+                outText = await FastbootCmd.Command("oem oeminforead-ANDROID_VERSION");
+                LogBox.Text += outText + "\n";
+                LogBox.ScrollToEnd();
+                LogBox.Text += langModel.HW_PSID + "\n";
+                outText = await FastbootCmd.Command("oem get-psid");
+                LogBox.Text += outText + "\n";
+                LogBox.ScrollToEnd();
+                LogBox.Text += langModel.HW_Battery + "\n";
+                outText = await FastbootCmd.Command("oem battery_present_check");
+                LogBox.Text += outText + "\n";
+                LogBox.ScrollToEnd();
+                LogBox.Text += langModel.HW_DongleInfo + "\n";
+                outText = await FastbootCmd.Command("getvar dongle_info");
+                LogBox.Text += outText + "\n";
+                LogBox.ScrollToEnd();
+                LogBox.Text += langModel.HW_KeyVer + "\n";
+                outText = await FastbootCmd.Command("oem get_key_version");
+                LogBox.Text += outText + "\n";
+                LogBox.ScrollToEnd();
+            }
+        }
+
+        private async void FBtoUpButton_Click(object sender, RoutedEventArgs e)
+        {
+            if (this.FilePathBox.Text == "" || this.FilePathBox.Text.EndsWith("flash_all.bat") || this.FilePathBox.Text.EndsWith("payload.bin"))
+            {
+                MessageBox.Show(langModel.Message_HWSelect, langModel.Log_Tips, MessageBoxButton.OK, MessageBoxImage.Warning);
+                this.Tab.SelectedItem = TabMain;
                 return;
             }
             bool found = false;
-            foreach (var item in Listview.Items.Cast<ListViewItem>())
+            foreach (var item in PartitionList.Items.Cast<ListViewItem>())
             {
-                if (item.Partitions == "recovery_ramdisk")
+                if (item.Part == "recovery_ramdisk")
                 {
                     found = true;
                     break;
@@ -292,107 +766,159 @@ namespace FastbootFlasher
             }
             if (!found)
             {
-                MessageBox.Show("请选择基础包固件文件！", "提示", MessageBoxButton.OK, MessageBoxImage.Warning);
-                this.Tab.SelectedItem = this.Tab1;
+                MessageBox.Show(langModel.Message_HWBase, langModel.Log_Tips, MessageBoxButton.OK, MessageBoxImage.Warning);
+                this.Tab.SelectedItem = TabMain;
                 return;
             }
-
-            Potato.Fastboot.Fastboot fastboot = new();
-            var devices = Potato.Fastboot.Fastboot.GetDevices();
-            if (devices.Length == 0)
+            Tab.SelectedItem = TabMain;
+            LogBox.Text += langModel.Log_DetectingDevice;
+            string outText = await FastbootCmd.Command("devices");
+            var lines = outText.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries)
+                .Where(line => line.Contains("fastboot"))
+                .ToList();
+            if (lines.Count == 0)
             {
-                MessageBox.Show("未检测到Fastboot设备", "提示", MessageBoxButton.OK, MessageBoxImage.Warning);
+                LogBox.Text += "\n" + langModel.Log_DeviceNotFound + "\n\r";
+                LogBox.ScrollToEnd();
                 return;
             }
-            if (devices.Length > 1)
+            else if (lines.Count > 1)
             {
-                MessageBox.Show("检测到多台设备，请只连接一台设备!", "提示", MessageBoxButton.OK, MessageBoxImage.Warning);
-                return;
-            }
-            this.Tab.SelectedItem = this.Tab1;
-            Log.Text += $"已检测到设备：{string.Join(", ", devices)}\n";
-            Log.Text += "连接设备...\n";
-            fastboot.Connect();
-            Log.Text += $"已连接到设备：{fastboot.GetSerialNumber()}\n\r";
-            Log.Text += "查询救援版本:";
-            Potato.Fastboot.Fastboot.Response response;
-            response = fastboot.Command("getvar:rescue_version");
-            Log.Text += $"{response.Payload}\n";
-            foreach (var item in Listview.Items.Cast<ListViewItem>())
-            {
-                string partition = item.Partitions;
-                int num = item.Num;
-                string FilePath = item.SourceFilePath;
-                if (partition == "kernel")
+                LogBox.Text += "   " + langModel.Log_Success + "\n";
+                foreach (var line in lines)
                 {
-                    var appfile = UpdateFile.Open(FilePath, false);
-                    var entry = appfile.Entries[num];
-                    var progressReporter = new Progress<double>(p => ProgressBar1.Value = p);
-                    Log.Text += $"开始提取{entry.FileType.ToLower()}...\n";
-                    await APPProcess.ExtractPartition(FilePath, num);
-                    Log.Text += $"提取{entry.FileType.ToLower()}分区完成！\n\r";
-                    Log.ScrollToEnd();
-                }    
-                if (partition == "recovery_ramdisk")
-                {
-                    var appfile = UpdateFile.Open(FilePath, false);
-                    var entry = appfile.Entries[num];
-                    var progressReporter = new Progress<double>(p => ProgressBar1.Value = p);
-                    Log.Text += $"开始提取{entry.FileType.ToLower()}...\n";
-                    await APPProcess.ExtractPartition(FilePath, num);
-                    Log.Text += $"提取{entry.FileType.ToLower()}分区完成！\n\r";
-                    Log.ScrollToEnd();
+                    LogBox.Text += line + "\n";
                 }
-                if (partition == "recovery_vendor")
-                {
-                    var appfile = UpdateFile.Open(FilePath, false);
-                    var entry = appfile.Entries[num];
-                    var progressReporter = new Progress<double>(p => ProgressBar1.Value = p);
-                    Log.Text += $"开始提取{entry.FileType.ToLower()}...\n";
-                    await APPProcess.ExtractPartition(FilePath, num);
-                    Log.Text += $"提取{entry.FileType.ToLower()}分区完成！\n\r";
-                    Log.ScrollToEnd();
-                }
-                Log.ScrollToEnd();
+                LogBox.Text += langModel.Log_MultipleDevices + "\n\r";
+                LogBox.ScrollToEnd();
+                return;
             }
-            Log.Text += "刷入recovery_kernel...\n";
-            await fastboot.UploadData($@".\images\kernel.img");
-            File.Delete($@".\images\kernel.img");
-            fastboot.Command("flash:rescue_recovery_kernel");
-            Log.Text += "刷入recovery_kernel完成！\n\r";
-            Log.Text += "刷入recovery_ramdisk...\n";
-            await fastboot.UploadData($@".\images\recovery_ramdisk.img");
-            File.Delete($@".\images\recovery_ramdisk.img");
-            fastboot.Command("flash:rescue_recovery_ramdisk");
-            Log.Text += "刷入recovery_ramdisk完成！\n\r";
-            Log.Text += "刷入recovery_vendor...\n";
-            await fastboot.UploadData($@".\images\recovery_vendor.img");
-            File.Delete($@".\images\recovery_vendor.img");
-            fastboot.Command("flash:rescue_recovery_vendor");
-            Log.Text += "刷入recovery_vendor完成！\n\r";
-            Log.Text += "跳转升级模式...\n";
-            fastboot.Command("getvar:rescue_enter_recovery");
-            Log.Text += "跳转升级模式完成！\n\r";
-            Log.ScrollToEnd();
-            fastboot.Disconnect();
+            else
+            {
+                LogBox.Text += "   " + langModel.Log_Success + "\n";
+                LogBox.Text += lines[0] + "\n\r";
+                LogBox.ScrollToEnd();
+                LogBox.Text += langModel.Log_HWRescue+"\n";
+                outText = await FastbootCmd.Command("getvar rescue_version");
+                LogBox.Text += outText + "\n";
+                foreach (var item in PartitionList.Items.Cast<ListViewItem>())
+                {
+                    string partition = item.Part;
+                    int num = item.Num;
+                    string FilePath = item.Source;
+                    if (partition == "kernel")
+                    {
+                        LogBox.Text += string.Format(langModel.Log_ExtractingPartition, partition);
+                        await APPFile.ExtractPartition(FilePath, num);
+                        LogBox.ScrollToEnd();
+                        LogBox.Text += "   " + langModel.Log_Success + "\n\r";
+                        LogBox.ScrollToEnd();
+                    }
+                    if (partition == "recovery_ramdisk")
+                    {
+                        LogBox.Text += string.Format(langModel.Log_ExtractingPartition, partition);
+                        await APPFile.ExtractPartition(FilePath, num);
+                        LogBox.ScrollToEnd();
+                        LogBox.Text += "   " + langModel.Log_Success + "\n\r";
+                        LogBox.ScrollToEnd();
+                    }
+                    if (partition == "recovery_vendor")
+                    {
+                        LogBox.Text += string.Format(langModel.Log_ExtractingPartition, partition);
+                        await APPFile.ExtractPartition(FilePath, num);
+                        LogBox.ScrollToEnd();
+                        LogBox.Text += "   " + langModel.Log_Success + "\n\r";
+                        LogBox.ScrollToEnd();
+                    }
+                    LogBox.ScrollToEnd();
+                }
+                LogBox.Text += "\n" + string.Format(langModel.Log_FlashingPartition, "recovery_kernel") + "\n";
+                outText = await FastbootCmd.Command(@"flash rescue_recovery_kernel .\images\kernel.img");
+                LogBox.Text += outText;
+                if (outText.Contains("Command failed"))
+                {
+                    LogBox.Text += string.Format(langModel.Log_FlashFail, "recovery_kernel") + "\n\r";
+                }
+                else if (outText.Contains("Finished"))
+                {
+                    LogBox.Text += string.Format(langModel.Log_FlashSuccess, "recovery_kernel") + "\n\r";
+                }
+                File.Delete(@".\images\recovery_kernel.img");
+                LogBox.ScrollToEnd();
 
+                LogBox.Text += "\n" + string.Format(langModel.Log_FlashingPartition, "recovery_ramdisk") + "\n";
+                outText = await FastbootCmd.Command(@"flash rescue_recovery_ramdisk .\images\recovery_ramdisk.img");
+                LogBox.Text += outText;
+                if (outText.Contains("Command failed"))
+                {
+                    LogBox.Text += string.Format(langModel.Log_FlashFail, "recovery_ramdisk") + "\n\r";
+                }
+                else if (outText.Contains("Finished"))
+                {
+                    LogBox.Text += string.Format(langModel.Log_FlashSuccess, "recovery_ramdisk") + "\n\r";
+                }
+                File.Delete(@".\images\recovery_ramdisk.img");
+                LogBox.ScrollToEnd();
+
+                LogBox.Text += "\n" + string.Format(langModel.Log_FlashingPartition, "recovery_vendor") + "\n";
+                outText = await FastbootCmd.Command(@"flash rescue_recovery_vendor .\images\recovery_vendor.img");
+                LogBox.Text += outText;
+                if (outText.Contains("Command failed"))
+                {
+                    LogBox.Text += string.Format(langModel.Log_FlashFail, "recovery_vendor") + "\n\r";
+                }
+                else if (outText.Contains("Finished"))
+                {
+                    LogBox.Text += string.Format(langModel.Log_FlashSuccess, "recovery_vendor") + "\n\r";
+                }
+                File.Delete(@".\images\recovery_vendor.img");
+                LogBox.ScrollToEnd();
+
+                LogBox.Text +=langModel.Log_HWTo + "\n";
+                outText = await FastbootCmd.Command("getvar rescue_enter_recovery");
+                LogBox.Text += outText;
+                if (outText.Contains("FAILED"))
+                {
+                    LogBox.Text += langModel.Log_HWToFail+ "\n\r";
+                }
+                else if (outText.Contains("Finished"))
+                {
+                    LogBox.Text += langModel.Log_HWToSuccess + "\n\r";
+                }
+                LogBox.ScrollToEnd();
+            }
         }
 
+        
     }
-
 
     public class ListViewItem
     {
         public int Num { get; set; }
-        public string Partitions { get; set; }
+        public string Part { get; set; }
         public string Size { get; set; }
-        public string Address { get; set; }
-
-        public string SourceFilePath { get; set; } 
+        public string Addr { get; set; }
+        public string Source { get; set; }
     }
 
+    public class ProgressBarValue : INotifyPropertyChanged
+    {
+        public event PropertyChangedEventHandler PropertyChanged;
+        private double _value;
+        public double Value
+        {
+            get => _value;
+            set
+            {
+                _value = value;
+
+                if (PropertyChanged!=null)
+                {
+                    PropertyChanged.Invoke(this,new PropertyChangedEventArgs("Value"));
+                    
+                }
+            }
+        }
+    }
 
 }
-
-
-

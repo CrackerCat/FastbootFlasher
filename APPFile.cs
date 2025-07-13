@@ -1,42 +1,46 @@
-﻿using HuaweiUpdateLibrary;
-using HuaweiUpdateLibrary.Core;
-using HuaweiUpdateLibrary.Streams;
+﻿using HuaweiUpdateLibrary.Core;
 using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
-using System.Reflection.PortableExecutable;
 using System.Text;
 using System.Threading.Tasks;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
 
 namespace FastbootFlasher
 {
-    class APPProcess
+    class APPFile
     {
-        private const uint SPARSE_HEADER_MAGIC = 0xED26FF3A;
         private const uint DEFAULT_BLOCK_SIZE = 4096;
-        public static void ReadInfo(string[] FilePaths)
+
+        public static List<ListViewItem> ParseAPPFile(string filePath, out string versionInfo)
         {
-            for (int i = 0; i < FilePaths.Length; i++)
+            versionInfo = string.Empty;
+            var entries = new List<ListViewItem>();
+            var appfile = UpdateFile.Open(filePath, false);
+            var entry = appfile.Entries[2];
+            using var dataStream = entry.GetDataStream(filePath);
+            using var reader = new StreamReader(dataStream, Encoding.UTF8);
+
+            versionInfo = reader.ReadToEnd();
+
+            for (int i = 0; i < appfile.Entries.Count; i++)
             {
-                var appfile = UpdateFile.Open(FilePaths[i], false);
-                var entry = appfile.Entries[2];
-                Stream dataStream = entry.GetDataStream(FilePaths[i]);
-                StreamReader reader = new(dataStream, Encoding.UTF8);
-                string content = reader.ReadToEnd();
-                MainWindow.Instance.Log.AppendText("版本信息：\n");
-                MainWindow.Instance.Log.Text += content + "\n\r";
-                MainWindow.Instance.Log.ScrollToEnd();
-                for (int a = 0; a < appfile.Entries.Count; a++)
+                entry = appfile.Entries[i];
+                entries.Add(new ListViewItem
                 {
-                    entry = appfile.Entries[a];
-                    MainWindow.Instance.Listview.Items.Add(new ListViewItem { Num = a, Partitions = entry.FileType.ToLower(), Size = MainWindow.FormatSize(entry.FileSize), Address = "0x" + entry.FileSize.ToString("X8"), SourceFilePath = FilePaths[i] });
-                }
-                MainWindow.Instance.FilePath.Text += FilePaths[i] + "\n";
-                
+                    Num = i,
+                    Part = entry.FileType.ToLower(),
+                    Size = MainWindow.FormatSize(entry.FileSize),
+                    Addr = $"0x{entry.FileSize:X8}",
+                    Source = filePath
+                });
             }
+            
+            return entries;
         }
+
         public static async Task ExtractPartition(string FilePath, int index)
         {
             var APPFile = UpdateFile.Open(FilePath, false);
@@ -70,42 +74,11 @@ namespace FastbootFlasher
                     fileStream.Write(buffer, 0, bytesRead);
                     currentBytes += bytesRead;
 
+                    MainWindow.pb.Value = (double)currentBytes / totalSize * 100;
+                }
+            }
+        }
 
-                    MainWindow.Instance.ProgressBar1.Value = (double)currentBytes / totalSize * 100;
-                }
-            }
-        }
-        public static async Task ExtractSelectedPartitions(bool skip=false)
-        {
-            foreach (var item in MainWindow.Instance.Listview.SelectedItems.Cast<ListViewItem>())
-            {
-                string partition = item.Partitions;
-                string FilePath = item.SourceFilePath;
-                if (skip==true && MainWindow.Instance.skipPartitions.Contains(partition))
-                {
-                    MainWindow.Instance.Log.Text += $"跳过 {partition} 分区提取！\n\r";
-                    continue;
-                }
-                if (partition == "hisiufs_gpt")
-                    partition = "ptable";
-                if (partition == "ufsfw")
-                    partition = "ufs_fw";
-                MainWindow.Instance.Log.Text += $"正在提取 {partition} 分区...\n";
-                await ExtractPartition(FilePath, item.Num);
-                MainWindow.Instance.Log.Text += $"{partition}分区提取完成！\n\r";
-                MainWindow.Instance.Log.ScrollToEnd();
-            }
-            MainWindow.Instance.Log.Text += $"所有选中分区已提取到images文件夹！\n\r";
-            if (File.Exists($@".\images\super.1.img"))
-            {
-                MainWindow.Instance.Log.Text += "检测到两个super分区，开始合成...\n";
-                await MergerSuperSparse();
-                File.Delete(@".\images\super.1.img");
-                File.Delete(@".\images\super.2.img");
-                MainWindow.Instance.Log.Text += "合成完毕！\n\r";
-            }
-            MainWindow.Instance.Log.ScrollToEnd();
-        }
         public static async Task MergerSuperSparse(string super1 = $@".\images\super.1.img", string super2 = $@".\images\super.2.img", string super = $@".\images\super.img")
         {
             FileInfo file1 = new(super1);
@@ -116,7 +89,7 @@ namespace FastbootFlasher
                 super2 = $@".\images\super.1.img";
 
             }
-                
+
             using (FileStream fs = new(super2, FileMode.Open, FileAccess.Read))
             using (BinaryReader reader = new(fs))
             using (FileStream outputFs = new(super, FileMode.Create, FileAccess.Write))
@@ -131,7 +104,7 @@ namespace FastbootFlasher
                     fs.Seek(chunk.TotalSize - header.ChunkHeaderSize, SeekOrigin.Current);
                 }
                 fs.Seek(0, SeekOrigin.Begin);
-                byte[] buffer = new byte[1024*1024];
+                byte[] buffer = new byte[1024 * 1024];
                 long bytesToRead = lastChunkOffset;
                 int bytesRead;
                 while (bytesToRead > 0 && (bytesRead = await fs.ReadAsync(buffer.AsMemory(0, (int)Math.Min(buffer.Length, bytesToRead)))) > 0)
@@ -170,25 +143,28 @@ namespace FastbootFlasher
                 writer.Write(newTotalChunks);
             }
         }
+        
         private struct SparseHeader
         {
-            public uint Magic;            
-            public ushort MajorVersion;   
-            public ushort MinorVersion;  
-            public ushort FileHeaderSize; 
+            public uint Magic;
+            public ushort MajorVersion;
+            public ushort MinorVersion;
+            public ushort FileHeaderSize;
             public ushort ChunkHeaderSize;
-            public uint BlockSize;        
-            public uint TotalBlocks;      
-            public uint TotalChunks;      
-            public uint ImageChecksum;    
+            public uint BlockSize;
+            public uint TotalBlocks;
+            public uint TotalChunks;
+            public uint ImageChecksum;
         }
+        
         private struct ChunkHeader
         {
-            public ushort ChunkType;      
-            public ushort Reserved;       
-            public uint ChunkSize;       
-            public uint TotalSize;        
+            public ushort ChunkType;
+            public ushort Reserved;
+            public uint ChunkSize;
+            public uint TotalSize;
         }
+        
         private static ChunkHeader ReadChunkHeader(BinaryReader reader)
         {
             return new ChunkHeader
@@ -199,8 +175,8 @@ namespace FastbootFlasher
                 TotalSize = reader.ReadUInt32()
             };
         }
-
-        static SparseHeader ReadSparseHeader(BinaryReader reader)
+       
+        private static SparseHeader ReadSparseHeader(BinaryReader reader)
         {
             return new SparseHeader
             {
@@ -215,12 +191,12 @@ namespace FastbootFlasher
                 ImageChecksum = reader.ReadUInt32()
             };
         }
+        
         private static SparseHeader ReadSparseHeader(string filePath)
         {
             using FileStream fs = new(filePath, FileMode.Open, FileAccess.Read);
             using BinaryReader reader = new(fs);
             return ReadSparseHeader(reader);
         }
-
     }
 }

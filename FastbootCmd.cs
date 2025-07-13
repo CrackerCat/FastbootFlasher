@@ -1,52 +1,39 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.Diagnostics;
-using System.IO;
+using System.Linq;
 using System.Text;
+using System.Threading.Tasks;
 using System.Windows;
-using System.Windows.Threading;
-using FastbootFlasher;
 
-namespace Fastboot
+namespace FastbootFlasher
 {
     class FastbootCmd
     {
-        public async Task Fastboot(string fbshell)
+        public static async Task<string> Command(string fbshell)
         {
-            await Task.Run(() =>
+            string cmd = @".\tools\fastboot.exe";
+            ProcessStartInfo fastboot = new ProcessStartInfo(cmd, fbshell)
             {
-                string cmd = @".\tools\fastboot.exe";
-                ProcessStartInfo fastboot = new(cmd, fbshell)
-                {
-                    CreateNoWindow = true,
-                    UseShellExecute = false,
-                    RedirectStandardOutput = true,
-                    RedirectStandardError = true
-                };
-                using Process fb = new();
-                fb.StartInfo = fastboot;
-                _ = fb.Start();
-                fb.ErrorDataReceived += new DataReceivedEventHandler(OutputHandler);
-                fb.OutputDataReceived += new DataReceivedEventHandler(OutputHandler);
-                fb.BeginOutputReadLine();
-                fb.BeginErrorReadLine();
-                fb.WaitForExit();
-                fb.Close();
-            });
+                CreateNoWindow = true,
+                UseShellExecute = false,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                StandardOutputEncoding = System.Text.Encoding.UTF8,
+                StandardErrorEncoding = System.Text.Encoding.UTF8
+            };
+            using Process fb = new Process();
+            fb.StartInfo = fastboot;
+            _ = fb.Start();
+            string output = await fb.StandardError.ReadToEndAsync();
+            if (output == "")
+            {
+                output = await fb.StandardOutput.ReadToEndAsync();
+            }
+            fb.WaitForExit();
+            return output;
         }
 
-        private async void OutputHandler(object sendingProcess, DataReceivedEventArgs outLine)
-        {
-            if (!string.IsNullOrEmpty(outLine.Data))
-            {
-                await Application.Current.Dispatcher.InvokeAsync(() =>
-                {
-                    MainWindow.Instance.Log.AppendText(outLine.Data + Environment.NewLine);
-                    MainWindow.Instance.Log.ScrollToEnd();
-                    MainWindow.Instance.Log.CaretIndex = MainWindow.Instance.Log.Text.Length;
-                    string output="";
-                    output += outLine.Data + Environment.NewLine;
-                });
-            }
-        }
+        
     }
 }
