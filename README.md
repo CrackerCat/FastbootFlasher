@@ -1,7 +1,7 @@
 <a href="https://github.com/Natsume324/FastbootFlasher/blob/master/README-EN.md">Go to English version</a>
 
 <div id="header" align="center">
-	<img src="https://raw.githubusercontent.com/Natsume324/FastbootFlasher/refs/heads/master/logo.ico" ></img> 
+	<img src="https://raw.githubusercontent.com/Natsume324/FastbootFlasher/refs/heads/master/logo.png" ></img> 
 	<h1>斑•Fastboot刷写者</h1>
 	<div id="badges" >
 		<a href="https://github.com/Natsume324/FastbootFlasher/blob/master/LICENSE"><img src="https://img.shields.io/github/license/Uotan-Dev/UotanToolboxNT" alt="License"/></a>
