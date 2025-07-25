@@ -17,7 +17,6 @@
   <ItemGroup>
     <PackageReference Include="Google.Protobuf" Version="3.31.1" />
     <PackageReference Include="SharpCompress" Version="0.40.0" />
-    <PackageReference Include="ZstdNet" Version="1.4.5" />
   </ItemGroup>
 
   <ItemGroup>
@@ -25,16 +24,10 @@
       <HintPath>..\HuaweiUpdateLib\HuaweiUpdateLibrary\bin\Release\APPLibrary.dll</HintPath>
     </Reference>
     <Reference Include="PayloadLib">
-      <HintPath>C:\Users\Natsume324\Downloads\PayloadLib-master\bin\Debug\net8.0\PayloadLib.dll</HintPath>
+      <HintPath>..\PayloadLib\bin\Debug\net8.0\PayloadLib.dll</HintPath>
     </Reference>
   </ItemGroup>
 
-  <ItemGroup>
-    <None Remove="C:\Users\Natsume324\.nuget\packages\zstdnet\1.4.5\build\x64\libzstd.dll" />
-  </ItemGroup>
 
-  <ItemGroup>
-    <None Remove="C:\Users\Natsume324\.nuget\packages\zstdnet\1.4.5\build\x86\libzstd.dll" />
-  </ItemGroup>
 
 </Project>

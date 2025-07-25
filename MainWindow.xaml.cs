@@ -25,6 +25,7 @@ namespace FastbootFlasher
     /// </summary>
     public partial class MainWindow : Window
     {
+        public static MainWindow Instance { get; private set; }
         private dynamic langModel;
         public ObservableCollection<ListViewItem> Items { get; }
             = new ObservableCollection<ListViewItem>();
@@ -35,6 +36,7 @@ namespace FastbootFlasher
         public MainWindow()
         {
             InitializeComponent();
+            Instance = this;
             string iniPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "lang.ini");
             langModel = new DynamicLanguageModel(iniPath);
             DataContext = langModel;
@@ -57,7 +59,7 @@ namespace FastbootFlasher
             LogBox.Clear();
             Microsoft.Win32.OpenFileDialog openFileDialog = new()
             {
-                Filter = langModel.Firmware+"|*.app;payload.bin;flash_all.bat",
+                Filter = langModel.Firmware+"|*.app;payload.bin;flash_all.bat;*.img",
                 Multiselect = true,
                 Title = langModel.SelectFile
             };
@@ -125,13 +127,14 @@ namespace FastbootFlasher
                         LogBox.Text += langModel.Log_MetadataNotFound+"\n\r";
                     }
                 }
-                else
+                else if (openFileDialog.SafeFileName.EndsWith(".APP")|| openFileDialog.SafeFileName.EndsWith(".app"))
+                {
                     foreach (var filePath in openFileDialog.FileNames)
                     {
                         var entries = APPFile.ParseAPPFile(filePath, out var versionInfo);
 
-                        
-                        LogBox.AppendText(langModel.Log_VersionInfo+$"\n{versionInfo}\n");
+
+                        LogBox.AppendText(langModel.Log_VersionInfo + $"\n{versionInfo}\n");
                         LogBox.ScrollToEnd();
 
                         foreach (var entry in entries)
@@ -141,6 +144,36 @@ namespace FastbootFlasher
 
                         FilePathBox.Text += $"{filePath}\n";
                     }
+                }
+                else if (openFileDialog.SafeFileName.EndsWith(".img"))
+                {
+                    var num = 1;
+                    for (int i = 0; i < openFileDialog.FileNames.Length; i++)
+                    {
+                        string filePath = openFileDialog.FileNames[i];
+                        string filename = openFileDialog.SafeFileNames[i];
+
+                        if (!filename.EndsWith(".img", StringComparison.OrdinalIgnoreCase))
+                            continue;
+
+                        FileInfo fileInfo = new(filePath);
+                        long imgSize = fileInfo.Length;
+
+                        Items.Add(new ListViewItem
+                        {
+                            Num = num,
+                            Size = FormatSize(imgSize),
+                            Addr = "0x" + imgSize.ToString("X8"),
+                            Part = Path.GetFileNameWithoutExtension(filename), 
+                            Source = filePath
+                        });
+
+                        num++;
+                        FilePathBox.Text += $"{filePath}\n";
+                    }
+
+                }
+
             }
 
         }
@@ -162,9 +195,11 @@ namespace FastbootFlasher
 
             if (FilePathBox.Text.EndsWith("flash_all.bat"))
                 return;
+            else if (FilePathBox.Text.EndsWith(".img\n"))
+                return;
             else if (FilePathBox.Text.EndsWith("payload.bin"))
                 await PayExtractParts();
-            else
+            else if (FilePathBox.Text.EndsWith(".APP\n") || FilePathBox.Text.EndsWith(".app\n"))
                 await APPExtractParts();
         }
 
@@ -232,10 +267,10 @@ namespace FastbootFlasher
 
         private async void FlashButton_Click(object sender, RoutedEventArgs e)
         {
-            int sum;
+            int sum = 0;
             int fail=0;
             int okay=0;
-            LogBox.Text += langModel.Log_DetectingDevice;
+            LogBox.Text += langModel.Log_DetectingDevice+"\n";
             string outText = await FastbootCmd.Command("devices");
 
             
@@ -262,8 +297,8 @@ namespace FastbootFlasher
             }
             else
             {
-                LogBox.Text += "   " + langModel.Log_Success + "\n";
-                LogBox.Text += lines[0] + "\n\r";
+                LogBox.Text += langModel.Log_Success + "\n\r";
+                
                 LogBox.ScrollToEnd();
 
                 if (PartitionList.SelectedItems.Count == 0)
@@ -271,11 +306,12 @@ namespace FastbootFlasher
                     MessageBox.Show(langModel.Log_NoPartitionSelected, langModel.Log_NoPartitionSelected, MessageBoxButton.OK, MessageBoxImage.Warning);
                     return;
                 }
-                LogBox.Text += langModel.Log_ReadingLockState + "\n";
+                
                 if (FilePathBox.Text.EndsWith("flash_all.bat"))
                 {
+                    LogBox.Text += langModel.Log_ReadingLockState + "\n";
                     outText = await FastbootCmd.Command("oem device-info");
-                    LogBox.Text += outText+"\n";
+                    LogBox.Text += "\n";
                     DisabledControls();
                     sum = PartitionList.SelectedItems.Count;
                     foreach (var item in PartitionList.SelectedItems.Cast<ListViewItem>())
@@ -284,7 +320,7 @@ namespace FastbootFlasher
                         string FilePath = item.Source;
                         LogBox.Text += string.Format(langModel.Log_FlashingPartition, partition) + "\n";
                         outText=await FastbootCmd.Command($@"flash {partition} {FilePath}");
-                        LogBox.Text += outText;
+                       
                         if (outText.Contains("Command failed"))
                         {
                             LogBox.Text += string.Format(langModel.Log_FlashFail, partition) + "\n\r";
@@ -300,17 +336,18 @@ namespace FastbootFlasher
                 }
                 else if (FilePathBox.Text.EndsWith("payload.bin"))
                 {
+                    LogBox.Text += langModel.Log_ReadingLockState + "\n";
                     outText = await FastbootCmd.Command("oem device-info");
-                    LogBox.Text += outText + "\n";
-                    DisabledControls();
+                    LogBox.Text += "\n";
                     await PayExtractParts();
+                    DisabledControls();
                     sum = PartitionList.SelectedItems.Count;
                     foreach (var item in PartitionList.SelectedItems.Cast<ListViewItem>())
                     {
                         string partition = item.Part;
                         LogBox.Text += string.Format(langModel.Log_FlashingPartition, partition) + "\n";
                         outText=await FastbootCmd.Command($@"flash {partition} .\images\{partition}.img");
-                        LogBox.Text += outText;
+                        
                         if (outText.Contains("Command failed"))
                         {
                             LogBox.Text += string.Format(langModel.Log_FlashFail, partition) + "\n\r";
@@ -325,12 +362,13 @@ namespace FastbootFlasher
                         LogBox.ScrollToEnd();
                     }
                 }
-                else
+                else if(FilePathBox.Text.EndsWith(".APP\n") || FilePathBox.Text.EndsWith(".app\n"))
                 {
+                    LogBox.Text += langModel.Log_ReadingLockState + "\n";
                     outText = await FastbootCmd.Command("oem lock-state info");
-                    LogBox.Text += outText + "\n";
-                    DisabledControls();
+                    LogBox.Text += "\n";
                     await APPExtractParts(true);
+                    DisabledControls();
                     sum = PartitionList.SelectedItems.Count;
                     foreach (var item in PartitionList.SelectedItems.Cast<ListViewItem>())
                     {
@@ -347,7 +385,7 @@ namespace FastbootFlasher
                             partition = "ptable";
                             LogBox.Text += string.Format(langModel.Log_ErasingPartition, partition) + "\n";
                             outText=await FastbootCmd.Command("erase ptable");
-                            LogBox.Text += outText + "\n";
+                            
                             if (outText.Contains("Command failed"))
                             {
                                 LogBox.Text += string.Format(langModel.Log_EraseFail, partition) + "\n\r";
@@ -366,7 +404,7 @@ namespace FastbootFlasher
                             }
                             LogBox.Text += string.Format(langModel.Log_ErasingPartition, partition) + "\n";
                             outText = await FastbootCmd.Command("erase super");
-                            LogBox.Text += outText + "\n";
+                            
                             if (outText.Contains("Command failed"))
                             {
                                 LogBox.Text += string.Format(langModel.Log_EraseFail, partition) + "\n\r";
@@ -374,11 +412,12 @@ namespace FastbootFlasher
                             else if (outText.Contains("Finished"))
                             {
                                 LogBox.Text += string.Format(langModel.Log_EraseSuccess, partition) + "\n\r";
+                                LogBox.ScrollToEnd();
                             }
                         }
                         LogBox.Text += "\n"+ string.Format(langModel.Log_FlashingPartition, partition) + "\n";
                         outText = await FastbootCmd.Command($@"flash {partition} .\images\{partition}.img");
-                        LogBox.Text += outText;
+
                         if (outText.Contains("Command failed"))
                         {
                             LogBox.Text += string.Format(langModel.Log_FlashFail, partition) + "\n\r";
@@ -389,7 +428,47 @@ namespace FastbootFlasher
                             LogBox.Text += string.Format(langModel.Log_FlashSuccess, partition) + "\n\r";
                             okay++;
                         }
+                        else if (outText.Contains("No such file or directory"))
+                        {
+                            if (partition == "version" || partition == "preload")
+                            {
+                                LogBox.Text += string.Format(langModel.Log_SkipFlash, partition) + "\n\r";
+                                okay++;
+                            }
+                            else
+                            {
+                                LogBox.Text += string.Format(langModel.Log_FlashFail, partition) + "\n\r";
+                                fail++;
+                            }
+                        }
+
+
                         File.Delete($@".\images\{partition}.img");
+                        LogBox.ScrollToEnd();
+                    }
+                }
+                else if (FilePathBox.Text.EndsWith(".img\n"))
+                {
+                    DisabledControls();
+                    sum = PartitionList.SelectedItems.Count;
+                    foreach (var item in PartitionList.SelectedItems.Cast<ListViewItem>())
+                    {
+                        string partition = item.Part;
+                        string FilePath = item.Source;
+                        LogBox.Text += string.Format(langModel.Log_FlashingPartition, partition) + "\n";
+                        outText = await FastbootCmd.Command($@"flash {partition} {FilePath}");
+
+                        if (outText.Contains("Command failed"))
+                        {
+                            LogBox.Text += string.Format(langModel.Log_FlashFail, partition) + "\n\r";
+                            fail++;
+                        }
+                        else if (outText.Contains("Finished"))
+                        {
+                            LogBox.Text += string.Format(langModel.Log_FlashSuccess, partition) + "\n\r";
+                            okay++;
+                        }
+                       
                         LogBox.ScrollToEnd();
                     }
                 }
@@ -889,7 +968,6 @@ namespace FastbootFlasher
             }
         }
 
-        
     }
 
     public class ListViewItem

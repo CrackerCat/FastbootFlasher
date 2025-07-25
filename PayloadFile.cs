@@ -3,7 +3,6 @@ using Google.Protobuf;
 using Google.Protobuf.WellKnownTypes;
 using SharpCompress.Compressors.Xz;
 using SharpCompress.Compressors.BZip2;
-using ZstdNet;
 using PayloadLib;
 using System;
 using System.Collections.Generic;
