@@ -1,7 +1,7 @@
 <a href="https://github.com/Natsume324/FastbootFlasher/blob/master/README-EN.md">Go to English version</a>
 
 <div id="header" align="center">
-	<img src="https://raw.githubusercontent.com/Natsume324/FastbootFlasher/refs/heads/master/logo.ico" ></img> 
+	<img src="https://raw.githubusercontent.com/Natsume324/FastbootFlasher/refs/heads/master/logo.png" ></img> 
 	<h1>斑•Fastboot刷写者</h1>
 	<div id="badges" >
 		<a href="https://github.com/Natsume324/FastbootFlasher/blob/master/LICENSE"><img src="https://img.shields.io/github/license/Uotan-Dev/UotanToolboxNT" alt="License"/></a>
@@ -19,7 +19,7 @@
  
 ## 固件支持
 目前支持的固件：  
-华为：UPDATE.APP OTA 更新文件  
+华为：UPDATE.APP OTA 更新文件  鸿蒙NEXT update.bin OTA更新文件
 安卓：标准OTA固件payload.bin（包含小米，红米，OPPO，一加，真我等OTA固件） .img镜像文件  
 小米：官方线刷flash_all.bat脚本  
 
@@ -28,7 +28,7 @@
 ## 功能
 目前支持的功能：  
 
-华为：解析与提取.APP文件中的分区镜像，合并双super分区，选择分区刷写，刷入成功与失败统计，fasboot模式读取信息，fastboot模式跳转升级模式  
+华为：解析与提取.APP/update.bin文件中的分区镜像，合并双super分区，选择分区刷写，刷入成功与失败统计，fasboot模式读取信息，fastboot模式跳转升级模式  
 
 安卓：解析与提取payload.bin固件中的分区镜像，选择分区刷写，刷入成功与失败统计，读取BL锁状态，执行解锁BL命令  
 多选.img镜像文件刷写，刷入分区由文件名决定

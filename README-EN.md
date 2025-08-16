@@ -20,7 +20,7 @@
 ## Firmware support
 Currently supported firmware:  
 
-Huawei: UPDATE.APP OTA update file  
+Huawei: UPDATE.APP OTA update file  Harmony NEXT update.bin OTA update file
 
 Android: Standard OTA firmware payload.bin (including Xiaomi, Redmi, OPPO, OnePlus, Realme and other OTA firmware) .img image file  
 
@@ -29,7 +29,7 @@ Xiaomi: Official flash_all.bat script
 ## Function
 Currently supported functions:  
 
-Huawei: parse and extract partition images in .APP files, merge dual super partitions, select partitions to flash, flash success and failure statistics, read information in fasboot mode, jump to upgrade mode in fastboot mode  
+Huawei: parse and extract partition images in .APP/update.bin files, merge dual super partitions, select partitions to flash, flash success and failure statistics, read information in fasboot mode, jump to upgrade mode in fastboot mode  
 
 Android: parse and extract partition images in payload.bin firmware, select partitions to flash, flash success and failure statistics, read BL lock status, execute unlock BL command  
 Select multiple .img image files to flash, the partition to be flashed is determined by the file name
